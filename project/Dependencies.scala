@@ -1,0 +1,24 @@
+import sbt._
+
+object Dependencies {
+
+  val fs2Version = "3.11.0"
+
+  val catsCore = Def.setting("org.typelevel" %% "cats-core" % "2.13.0")
+  val catsEffect = Def.setting("org.typelevel" %% "cats-effect" % "3.5.7")
+  val catsEffectKernel = Def.setting("org.typelevel" %% "cats-effect-kernel" % "3.5.7")
+  val catsEffectStd = Def.setting("org.typelevel" %% "cats-effect-std" % "3.5.7")
+
+  val fs2 = Def.setting("co.fs2" %% "fs2-core" % fs2Version)
+  val fs2IO = Def.setting("co.fs2" %% "fs2-io" % fs2Version)
+
+  val munit = Def.setting("org.scalameta" %% "munit" % "1.1.0" % Test)
+  val munitCatsEffect = Def.setting("org.typelevel" %% "munit-cats-effect" % "2.0.0" % Test)
+  val scalaCheck = Def.setting("org.scalacheck" %% "scalacheck" % "1.16.0" % Test)
+  val munitScalaCheck = Def.setting("org.scalameta" %% "munit-scalacheck" % "1.1.0" % Test)
+  val scalaCheckEffect = Def.setting("org.typelevel" %% "scalacheck-effect" % "2.0.0-M2" % Test)
+
+  val munitScalaCheckEffect = Def.setting(
+    "org.typelevel" %% "scalacheck-effect-munit" % "2.0.0-M2" % Test
+  )
+}
