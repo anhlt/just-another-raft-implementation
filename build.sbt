@@ -35,6 +35,15 @@ val raft = (project in file("raft-core"))
   )
   .dependsOn(raftGrpc)
 
+lazy val docs = project // new documentation project
+  .in(file("just-another-raft-docs")) // important: it must not be docs/
+  .dependsOn(raft)
+  .settings(
+    moduleName := "just-another-raft-docs",
+    mdocVariables := Map("VERSION" -> version.value),
+  )
+  .enablePlugins(MdocPlugin, DocusaurusPlugin)
+
 
 
 val root = (project in file("."))

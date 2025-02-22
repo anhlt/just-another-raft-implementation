@@ -1,7 +1,5 @@
 package com.grok.raft.core
 
-import com.grok.raft.grpc.Raft
-
 import cats.effect.IO
 
 object HelloWorld {
