@@ -10,7 +10,7 @@ The state of a Raft node is defined by the NodeState class. It can be one of the
 # Node properties
 A Raft node has the following properties:
 
-- currentTerm: The latest term the node has seen.
+- currentTerm: The latest term the node has seen. Increase every time the election happen
 - votedFor: The candidate ID the node voted for in the current term.
 - log: The log entries the node has recorded.
 - commitLength: The index of the highest log entry known to be applied or committed.
