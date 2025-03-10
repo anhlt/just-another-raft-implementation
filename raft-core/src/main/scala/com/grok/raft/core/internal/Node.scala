@@ -3,15 +3,14 @@ package com.grok.raft.core.internal
 import com.grok.raft.core.protocol.Action
 import com.grok.raft.core.protocol.VoteRequest
 import com.grok.raft.core.protocol.VoteResponse
-import com.grok.raft.core.protocol.AppendEntriesResponse
+import com.grok.raft.core.protocol.LogRequestResponse
 import com.grok.raft.core.storage.PersistedState
 import com.grok.raft.core.protocol.RequestForVote
 import com.grok.raft.core.protocol.StoreState
 import com.grok.raft.core.protocol.ReplicateLog
 import com.grok.raft.core.protocol.AnnounceLeader
 
-/** The Node state represents the State Machine in Raft Protocol The possible
-  * states are:
+/** The Node state represents the State Machine in Raft Protocol The possible states are:
   *   - Follower
   *   - Candidate
   *   - Leader
@@ -38,8 +37,21 @@ sealed trait Node {
       clusterConfiguration: ClusterConfiguration
   ): (Node, (VoteResponse, List[Action]))
 
-  /** This method is called when a VoteResponse is received
+  /** Called when a VoteResponse message is received from a peer node.
+    *
+    * This method processes the VoteResponse by:
+    *   - Validating the response to ensure it comes from a legitimate Raft peer.
+    *   - Checking term numbers and candidate identifiers to verify consistency with the current node state.
+    *   - Updating the current vote tally if the response supports the candidate role.
+    *   - Determining if a quorum has been reached to trigger a leader election victory.
+    *   - Resetting election timeouts and adjusting internal state as necessary.
+    *
+    * Proper handling of a VoteResponse is critical to maintaining the correctness and safety of the Raft consensus
+    * algorithm, ensuring that leader elections are conducted accurately and that the system remains robust in the
+    * presence of network partitions or delayed messages.
+    *
     * @param voteResponse
+    *   the VoteResponse message received from a peer node
     * @param logState
     * @param clusterConfiguration
     * @return
@@ -50,30 +62,22 @@ sealed trait Node {
       clusterConfiguration: ClusterConfiguration
   ): (Node, List[Action])
 
-  /** Handles an incoming LogRequest by evaluating the request's term and
-    * validating log consistency.
+  /** Handles an incoming LogRequest by evaluating the request's term and validating log consistency.
     *
-    * When a node receives an AppendEntries (LogRequest) message, the following
-    * steps are carried out:
+    * When a node receives an AppendEntries (LogRequest) message, the following steps are carried out:
     *
     *   1. Term Update:
-    *      - If the term specified in the LogRequest is greater than the node's
-    *        current term, the node must update its current term to that of the
-    *        incoming request.
-    *      - Clear any previously recorded vote (i.e. set votedFor to None) to
-    *        ensure no stale state persists.
+    *      - If the term specified in the LogRequest is greater than the node's current term, the node must update its
+    *        current term to that of the incoming request.
+    *      - Clear any previously recorded vote (i.e. set votedFor to None) to ensure no stale state persists.
     *
     * 2. Log Consistency Check:
-    *   - Verify that the node's local log is consistent with the leader's log
-    *     as indicated by the LogRequest.
-    *   - This involves comparing the follower’s log length with the
-    *     prevLogIndex provided in the request.
-    *   - If the follower's log is sufficiently long, confirm that the term of
-    *     the entry at prevLogIndex matches the prevLogTerm in the LogRequest.
-    *   - If any inconsistency is detected (e.g., if there is a gap or a term
-    *     mismatch), the request should be rejected.
-    *
-    * @param appendEntriesRequest
+    *   - Verify that the node's local log is consistent with the leader's log as indicated by the LogRequest.
+    *   - This involves comparing the follower’s log length with the prevLogIndex provided in the request.
+    *   - If the follower's log is sufficiently long, confirm that the term of the entry at prevLogIndex matches the
+    *     prevLogTerm in the LogRequest.
+    *   - If any inconsistency is detected (e.g., if there is a gap or a term mismatch), the request should be rejected.
+    * @param logRequest
     *   the request containing log replication details.
     * @param logState
     *   the current state of the log.
@@ -82,22 +86,27 @@ sealed trait Node {
     * @param clusterConfiguration
     *   current cluster configuration details.
     * @return
-    *   a tuple comprising the updated Node state and a tuple of
-    *   AppendEntriesResponse with any resulting actions.
+    *   a tuple comprising the updated Node state and a tuple of LogRequestResponse with any resulting actions.
     */
   def onLogRequest(
-      appendEntriesRequest: LogRequest,
+      logRequest: LogRequest,
       logState: LogState,
       logEntryAtPrevLogIndex: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (AppendEntriesResponse, List[Action]))
+  ): (Node, (LogRequestResponse, List[Action]))
+
+  def onLogRequestResponse(
+      logState: LogState,
+      config: ClusterConfiguration,
+      msg: LogRequestResponse
+  ): (Node, List[Action])
 
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action]
 
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, AppendEntriesResponse)
+  ): (Node, LogRequestResponse)
 
   def leader(): Option[NodeAddress]
 
@@ -142,24 +151,106 @@ case class Follower(
   ): (Node, List[Action]) = ???
 
   /** This method is called when a LogRequest is received
-    * @param appendEntriesRequest
+    * @param logRequest
     * @param logState
     * @param clusterConfiguration
     * @return
     */
   def onLogRequest(
-      appendEntriesRequest: LogRequest,
+      logRequest: LogRequest,
       logState: LogState,
       logEntryAtPrevLogIndex: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (AppendEntriesResponse, List[Action])) = ???
+  ): (Node, (LogRequestResponse, List[Action])) = {
+
+    val LogRequest(
+      leaderId,
+      leaderTerm,
+      leaderAcknowlegedPrevLogIndex,
+      leaderAcknowlegedPrevLogTerm,
+      _,
+      _
+    ) = logRequest
+
+    if (currentTerm > leaderTerm) {
+      (
+        this,
+        (
+          LogRequestResponse(
+            address,
+            currentTerm,
+            logState.lastLogIndex,
+            false
+          ),
+          List.empty[Action]
+        )
+      )
+    } else {
+      val nextState =
+        this.copy(currentTerm = leaderTerm, currentLeader = Some(leaderId))
+
+      val announceLeaderAction =
+        if (currentLeader.contains(leaderId))
+          List(
+            AnnounceLeader(
+              leaderId = leaderId,
+              resetPrevious = currentLeader.isEmpty
+            )
+          )
+        else List.empty[Action]
+
+      val actions = StoreState :: announceLeaderAction
+
+      if (
+        logEntryAtPrevLogIndex
+          .map(_.term != leaderTerm)
+          .getOrElse(leaderAcknowlegedPrevLogTerm > 0)
+      ) {
+        (
+          nextState,
+          (
+            LogRequestResponse(
+              address,
+              leaderTerm,
+              leaderAcknowlegedPrevLogTerm,
+              false
+            ),
+            actions
+          )
+        )
+      } else {
+        (
+          nextState,
+          (
+            LogRequestResponse(
+              address,
+              leaderTerm,
+              leaderAcknowlegedPrevLogTerm + logRequest.entries.length,
+              true
+            ),
+            actions
+          )
+        )
+      }
+
+    }
+
+  }
+
+  def onLogRequestResponse(
+      logState: LogState,
+      config: ClusterConfiguration,
+      msg: LogRequestResponse
+  ): (Node, List[Action]) = {
+    ???
+  }
 
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = ???
 
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, AppendEntriesResponse) = ???
+  ): (Node, LogRequestResponse) = ???
 
   def leader(): Option[NodeAddress] = ???
 
@@ -263,9 +354,7 @@ case class Candidate(
       if (voteGranted) voteReceived + responseAddress else voteReceived
     val logLength = logState.lastLogIndex + 1
 
-    if (
-      term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize
-    ) {
+    if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
       // construct the leader state
       val sentLenghtMap = clusterConfiguration.members
         .filter(_ != address)
@@ -275,9 +364,7 @@ case class Candidate(
         .filter(_ != address)
         .map(node => (node, 0L))
         .toMap
-      val actions = clusterConfiguration.members.map(n =>
-        ReplicateLog(n, currentTerm, logLength)
-      )
+      val actions = clusterConfiguration.members.map(n => ReplicateLog(n, currentTerm, logLength))
 
       (
         Leader(address, currentTerm, sentLenghtMap, ackedLengthMap),
@@ -289,30 +376,36 @@ case class Candidate(
     }
   }
 
-  /** This method is called when a LogRequest is received
-    * Note that the candidate will become a follower if the term of the request
-    * is greater than its current term.
+  /** This method is called when a LogRequest is received Note that the candidate will become a follower if the term of
+    * the request is greater than its current term.
     *
-    * @param appendEntriesRequest
+    * @param logRequest
     * @param logState
     * @param logEntryAtPrevLogIndex
     * @param clusterConfiguration
     * @return
     */
   def onLogRequest(
-      appendEntriesRequest: LogRequest,
+      logRequest: LogRequest,
       logState: LogState,
       logEntryAtPrevLogIndex: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (AppendEntriesResponse, List[Action])) = {
+  ): (Node, (LogRequestResponse, List[Action])) = {
 
-    val LogRequest(_, leaderTerm, leaderAcknowlegedPrevLogIndex, leaderAcknowlegedPrevLogTerm , _, _) = appendEntriesRequest
+    val LogRequest(
+      leaderId,
+      leaderTerm,
+      leaderAcknowlegedPrevLogIndex,
+      leaderAcknowlegedPrevLogTerm,
+      _,
+      _
+    ) = logRequest
 
     if (leaderTerm < currentTerm) {
       (
         this,
         (
-          AppendEntriesResponse(
+          LogRequestResponse(
             address,
             currentTerm,
             logState.lastLogIndex,
@@ -324,19 +417,21 @@ case class Candidate(
     } else {
       val nextState = Follower(
         address,
-        appendEntriesRequest.term,
-        currentLeader = Some(appendEntriesRequest.leaderId)
+        logRequest.term,
+        currentLeader = Some(leaderId)
       )
       val actions =
-        List(StoreState, AnnounceLeader(appendEntriesRequest.leaderId))
+        List(StoreState, AnnounceLeader(leaderId))
 
       if (
-        logEntryAtPrevLogIndex.map(_.term != leaderTerm).getOrElse(leaderAcknowlegedPrevLogTerm> 0)
+        logEntryAtPrevLogIndex
+          .map(_.term != leaderTerm)
+          .getOrElse(leaderAcknowlegedPrevLogTerm > 0)
       ) {
         (
           nextState,
           (
-            AppendEntriesResponse(
+            LogRequestResponse(
               address,
               leaderTerm,
               leaderAcknowlegedPrevLogTerm,
@@ -349,10 +444,10 @@ case class Candidate(
         (
           nextState,
           (
-            AppendEntriesResponse(
+            LogRequestResponse(
               address,
               leaderTerm,
-              leaderAcknowlegedPrevLogTerm + appendEntriesRequest.entries.length,
+              leaderAcknowlegedPrevLogTerm + logRequest.entries.length,
               true
             ),
             actions
@@ -363,14 +458,21 @@ case class Candidate(
 
   }
 
-  def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = ???
+  def onLogRequestResponse(
+      logState: LogState,
+      config: ClusterConfiguration,
+      msg: LogRequestResponse
+  ): (Node, List[Action]) = (this, List.empty[Action])
+
+  def onReplicateLog(configCluster: ClusterConfiguration): List[Action] =
+    List.empty[Action]
 
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, AppendEntriesResponse) = ???
+  ): (Node, LogRequestResponse) = ???
 
-  def leader(): Option[NodeAddress] = ???
+  def leader(): Option[NodeAddress] = None
 
   def toPersistedState: PersistedState = ???
 
@@ -422,24 +524,30 @@ case class Leader(
   ): (Node, List[Action]) = ???
 
   /** This method is called when a LogRequest is received
-    * @param appendEntriesRequest
+    * @param logRequest
     * @param logState
     * @param clusterConfiguration
     * @return
     */
   def onLogRequest(
-      appendEntriesRequest: LogRequest,
+      logRequest: LogRequest,
       logState: LogState,
       logEntryAtPrevLogIndex: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (AppendEntriesResponse, List[Action])) = ???
+  ): (Node, (LogRequestResponse, List[Action])) = ???
+
+  def onLogRequestResponse(
+      logState: LogState,
+      config: ClusterConfiguration,
+      msg: LogRequestResponse
+  ): (Node, List[Action]) = ???
 
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = ???
 
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, AppendEntriesResponse) = ???
+  ): (Node, LogRequestResponse) = ???
 
   def leader(): Option[NodeAddress] = ???
 

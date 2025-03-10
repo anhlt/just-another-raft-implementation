@@ -1,8 +1,6 @@
 package com.grok.raft.core.internal
 
-
-/**
-  * Represents a single entry in the Raft log.
+/** Represents a single entry in the Raft log.
   */
 trait LogEntry {
   val term: Int
