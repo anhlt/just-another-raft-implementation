@@ -9,6 +9,7 @@ import com.grok.raft.core.protocol.RequestForVote
 import com.grok.raft.core.protocol.StoreState
 import com.grok.raft.core.protocol.ReplicateLog
 import com.grok.raft.core.protocol.AnnounceLeader
+import com.grok.raft.core.protocol.ResetLeaderAnnouncer
 
 /** The Node state represents the State Machine in Raft Protocol The possible states are:
   *   - Follower
@@ -62,36 +63,32 @@ sealed trait Node {
       clusterConfiguration: ClusterConfiguration
   ): (Node, List[Action])
 
-  /** Handles an incoming LogRequest by evaluating the request's term and validating log consistency.
-    *
-    * When a node receives an AppendEntries (LogRequest) message, the following steps are carried out:
-    *
-    *   1. Term Update:
-    *      - If the term specified in the LogRequest is greater than the node's current term, the node must update its
-    *        current term to that of the incoming request.
-    *      - Clear any previously recorded vote (i.e. set votedFor to None) to ensure no stale state persists.
-    *
-    * 2. Log Consistency Check:
-    *   - Verify that the node's local log is consistent with the leader's log as indicated by the LogRequest.
-    *   - This involves comparing the follower’s log length with the prevLogIndex provided in the request.
-    *   - If the follower's log is sufficiently long, confirm that the term of the entry at prevLogIndex matches the
-    *     prevLogTerm in the LogRequest.
-    *   - If any inconsistency is detected (e.g., if there is a gap or a term mismatch), the request should be rejected.
-    * @param logRequest
-    *   the request containing log replication details.
-    * @param logState
-    *   the current state of the log.
-    * @param logEntryAtPrevLogIndex
-    *   the log entry at the index specified in the request.
-    * @param clusterConfiguration
-    *   current cluster configuration details.
-    * @return
-    *   a tuple comprising the updated Node state and a tuple of LogRequestResponse with any resulting actions.
-    */
+  /**
+   * Processes an incoming LogRequest (AppendEntries) message.
+   *
+   * This method performs the following operations:
+   *
+   *   1. Term Update:
+   *      - If the term in the LogRequest exceeds the current term, update the node's term.
+   *      - Clear any previously recorded vote by setting votedFor to None.
+   *
+   *   2. Log Consistency Check:
+   *      - Verify the consistency of the local log with the leader's log.
+   *      - Compare the follower’s log length with the prevSentLogLength provided in the request.
+   *      - If the follower's log is sufficiently long, ensure that the log entry at the prevSentLogLength index matches the prevLogTerm in the request.
+   *      - Reject the request if any inconsistencies, such as gaps or term mismatches, are detected.
+   *
+   * @param logRequest             the log replication request from the leader.
+   * @param logState               the current state of the local log.
+   * @param logEntryAtPrevSent     the log entry at the specified prevSentLogLength.
+   * @param clusterConfiguration   the current cluster configuration details.
+   *
+   * @return                       a tuple consisting of the updated Node state and a tuple of LogRequestResponse along with any generated actions.
+   */
   def onLogRequest(
       logRequest: LogRequest,
       logState: LogState,
-      logEntryAtPrevLogIndex: Option[LogEntry],
+      logEntryAtPrevSent: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
   ): (Node, (LogRequestResponse, List[Action]))
 
@@ -136,7 +133,40 @@ case class Follower(
       voteRequest: VoteRequest,
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (VoteResponse, List[Action])) = ???
+  ): (Node, (VoteResponse, List[Action])) = {
+    val VoteRequest(
+      proposedLeaderAddress,
+      candidateTerm,
+      candidateLogLenth,
+      candidateLastLogTerm
+    ) = voteRequest
+
+    val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
+    val logOk =
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLenth >= logState.logLength)
+
+    val termOk =
+      candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
+        .contains(proposedLeaderAddress))
+
+    (logOk && termOk) match
+      case true =>
+        (
+          this.copy(currentTerm = candidateTerm, votedFor = Some(proposedLeaderAddress)),
+          (
+            VoteResponse(address, candidateTerm, logOk && termOk),
+            List(StoreState)
+          )
+        )
+      case false =>
+        (
+          this,
+          (
+            VoteResponse(address, currentTerm, logOk && termOk),
+            List.empty[Action]
+          )
+        )
+  }
 
   /** This method is called when a VoteResponse is received
     * @param voteResponse
@@ -148,7 +178,7 @@ case class Follower(
       voteResponse: VoteResponse,
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, List[Action]) = ???
+  ): (Node, List[Action]) = (this, List.empty[Action])
 
   /** This method is called when a LogRequest is received
     * @param logRequest
@@ -159,15 +189,15 @@ case class Follower(
   def onLogRequest(
       logRequest: LogRequest,
       logState: LogState,
-      logEntryAtPrevLogIndex: Option[LogEntry],
+      logEntryAtPrevSent: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
   ): (Node, (LogRequestResponse, List[Action])) = {
 
     val LogRequest(
       leaderId,
       leaderTerm,
-      leaderAcknowlegedPrevLogIndex,
-      leaderAcknowlegedPrevLogTerm,
+      prevSentLogLength,
+      prevLastLogTerm,
       _,
       _
     ) = logRequest
@@ -179,7 +209,7 @@ case class Follower(
           LogRequestResponse(
             address,
             currentTerm,
-            logState.lastLogIndex,
+            logState.logLength,
             false
           ),
           List.empty[Action]
@@ -202,9 +232,10 @@ case class Follower(
       val actions = StoreState :: announceLeaderAction
 
       if (
-        logEntryAtPrevLogIndex
-          .map(_.term != leaderTerm)
-          .getOrElse(leaderAcknowlegedPrevLogTerm > 0)
+        logState.logLength >= prevSentLogLength &&
+        logEntryAtPrevSent
+          .map(_.term == prevLastLogTerm)
+          .getOrElse(prevSentLogLength == 0)
       ) {
         (
           nextState,
@@ -212,12 +243,13 @@ case class Follower(
             LogRequestResponse(
               address,
               leaderTerm,
-              leaderAcknowlegedPrevLogTerm,
-              false
+              prevSentLogLength + logRequest.entries.length,
+              true
             ),
             actions
           )
         )
+
       } else {
         (
           nextState,
@@ -225,14 +257,13 @@ case class Follower(
             LogRequestResponse(
               address,
               leaderTerm,
-              leaderAcknowlegedPrevLogTerm + logRequest.entries.length,
-              true
+              0, // TODO: verify
+              false
             ),
             actions
           )
         )
       }
-
     }
 
   }
@@ -241,11 +272,9 @@ case class Follower(
       logState: LogState,
       config: ClusterConfiguration,
       msg: LogRequestResponse
-  ): (Node, List[Action]) = {
-    ???
-  }
+  ): (Node, List[Action]) = (this, List.empty[Action])
 
-  def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = ???
+  def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = List.empty[Action]
 
   def onSnapshotInstalled(
       logState: LogState,
@@ -275,7 +304,7 @@ case class Candidate(
     val newLastLogTerm =
       logState.lastLogTerm.getOrElse(0L) // Potential bug. Need to check later
     val voteRequest =
-      VoteRequest(address, newTerm, logState.lastLogIndex, newLastLogTerm)
+      VoteRequest(address, newTerm, logState.logLength, newLastLogTerm)
 
     val actions = clusterConfiguration.members
       .filterNot(_ == address)
@@ -305,13 +334,13 @@ case class Candidate(
     val VoteRequest(
       proposedLeaderAddress,
       candidateTerm,
-      candidateLastLogIndex,
+      candidateLogLenth,
       candidateLastLogTerm
     ) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLastLogIndex >= logState.lastLogIndex)
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLenth >= logState.logLength)
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -352,13 +381,13 @@ case class Candidate(
 
     val newVoteReceived =
       if (voteGranted) voteReceived + responseAddress else voteReceived
-    val logLength = logState.lastLogIndex + 1
+    val logLength = logState.logLength
 
     if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
       // construct the leader state
       val sentLenghtMap = clusterConfiguration.members
         .filter(_ != address)
-        .map(node => (node, logLength))
+        .map(node => (node, logLength)) // we think we lenght of log
         .toMap
       val ackedLengthMap = clusterConfiguration.members
         .filter(_ != address)
@@ -381,22 +410,22 @@ case class Candidate(
     *
     * @param logRequest
     * @param logState
-    * @param logEntryAtPrevLogIndex
+    * @param logEntryAtPrevSent
     * @param clusterConfiguration
     * @return
     */
   def onLogRequest(
       logRequest: LogRequest,
       logState: LogState,
-      logEntryAtPrevLogIndex: Option[LogEntry],
+      logEntryAtPrevSent: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
   ): (Node, (LogRequestResponse, List[Action])) = {
 
     val LogRequest(
       leaderId,
       leaderTerm,
-      leaderAcknowlegedPrevLogIndex,
-      leaderAcknowlegedPrevLogTerm,
+      prevSentLogLength,
+      prevLastLogTerm,
       _,
       _
     ) = logRequest
@@ -408,7 +437,7 @@ case class Candidate(
           LogRequestResponse(
             address,
             currentTerm,
-            logState.lastLogIndex,
+            logState.logLength,
             false
           ),
           List.empty[Action]
@@ -423,10 +452,13 @@ case class Candidate(
       val actions =
         List(StoreState, AnnounceLeader(leaderId))
 
+      // check if current log on the candidate is long enough
+      // and if it long enough, check if the term of at logEntry At PrevLogIndex is the same as the prevLogTerm
       if (
-        logEntryAtPrevLogIndex
-          .map(_.term != leaderTerm)
-          .getOrElse(leaderAcknowlegedPrevLogTerm > 0)
+        logState.logLength >= prevSentLogLength &&
+        logEntryAtPrevSent
+          .map(_.term == prevLastLogTerm)
+          .getOrElse(prevSentLogLength == 0)
       ) {
         (
           nextState,
@@ -434,12 +466,13 @@ case class Candidate(
             LogRequestResponse(
               address,
               leaderTerm,
-              leaderAcknowlegedPrevLogTerm,
-              false
+              prevSentLogLength + logRequest.entries.length,
+              true
             ),
             actions
           )
         )
+
       } else {
         (
           nextState,
@@ -447,8 +480,8 @@ case class Candidate(
             LogRequestResponse(
               address,
               leaderTerm,
-              leaderAcknowlegedPrevLogTerm + logRequest.entries.length,
-              true
+              0, // TODO: verify
+              false
             ),
             actions
           )
@@ -479,18 +512,19 @@ case class Candidate(
 }
 
 /*
- * The Leader state represents the Leader Node in Raft Protocol
- * @param address the address of the node
- * @param currentTerm the current term of the node
- * @param sentLenght the lenght of the log entries counted already sent to each node
- * @param ackedLength the lenght of the log entries counted from the beginning acked by each node
+ * The Leader state defines the behavior of a node serving as the leader in the Raft consensus protocol.
+ *
+ * @param address       The unique network address of the node.
+ * @param currentTerm   The term number that the node is currently operating in.
+ * @param sentIndex     A mapping from each peer node's address to the highest log index that has been transmitted to that peer.
+ * @param ackedIndex    A mapping from each peer node's address to the highest log index that has been confirmed as received by that peer.
  */
 
 case class Leader(
     val address: NodeAddress,
     val currentTerm: Long,
-    val sentLenght: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
-    val ackedLength: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
+    val sentLenghtMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
+    val ackLenghtMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
     val currentLeader: Option[NodeAddress] = None
 ) extends Node {
 
@@ -499,17 +533,61 @@ case class Leader(
       clusterConfiguration: ClusterConfiguration
   ): (Node, List[Action]) = ???
 
-  /** This method is called when a VoteRequest is received
+  /** Invoked upon receipt of a VoteRequest.
+    *
+    * When invoked, the method evaluates the conditions logOK and termOK:
+    *   - If both conditions are true, the node transitions to a follower state.
+    *   - Otherwise, the node retains its leader status, but directs the candidate to switch to a follower state, and
+    *     initiates log replication towards the candidate.
+    *   - The method returns a tuple containing the updated node state and a list of actions to be executed.
+    *
     * @param voteRequest
+    *   the request message for a vote.
     * @param logState
+    *   the current state of the log.
     * @param clusterConfiguration
+    *   the current configuration of the cluster.
     * @return
+    *   a tuple containing the resultant node state and accompanying actions.
     */
   def onVoteRequest(
       voteRequest: VoteRequest,
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (VoteResponse, List[Action])) = ???
+  ): (Node, (VoteResponse, List[Action])) = {
+
+    val VoteRequest(
+      proposedLeaderAddress,
+      candidateTerm,
+      candidateLogLenth,
+      candidateLastLogTerm
+    ) = voteRequest
+
+    val lastLogTerm = logState.lastLogTerm.getOrElse(currentTerm)
+    val logOk =
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLenth >= logState.logLength)
+
+    val termOk = candidateTerm > currentTerm
+
+    (logOk && termOk) match
+      case true =>
+        (
+          Follower(address, candidateTerm, Some(proposedLeaderAddress)),
+          (
+            VoteResponse(address, candidateTerm, logOk && termOk),
+            List(StoreState, ResetLeaderAnnouncer)
+          )
+        )
+      case false =>
+        (
+          this,
+          (
+            VoteResponse(address, currentTerm, logOk && termOk),
+            List.empty[Action]
+          )
+        )
+
+  }
 
   /** This method is called when a VoteResponse is received
     * @param voteResponse
@@ -532,7 +610,7 @@ case class Leader(
   def onLogRequest(
       logRequest: LogRequest,
       logState: LogState,
-      logEntryAtPrevLogIndex: Option[LogEntry],
+      logEntryAtPrevSent: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
   ): (Node, (LogRequestResponse, List[Action])) = ???
 

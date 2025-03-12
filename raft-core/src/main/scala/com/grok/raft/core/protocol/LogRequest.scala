@@ -1,22 +1,30 @@
 package com.grok.raft.core.internal
-
-/** Request to replicate the logs from leader to followers. Sent from leader whenever there is a new message in the log
-  * and also periodically If there is no message the entries is empty list
+/**
+  * Log replication request from the leader to a follower.
   *
-  * Leader has a dictinary sentLength which keeps track of the number of logs sent to each follower To construct the log
-  * request, leader get the prevLogIndex from the sentLength and get the logs from the log
+  * Generated when a new log entry is appended or periodically when no new entries are available.
   *
-  * prevLogIndex = sentLenght[followerID]
+  * @param leaderId          Unique identifier of the leader node.
+  * @param term              Current term of the leader.
+  * @param prevSentLogLength Count of log entries previously sent to the follower.
+  * @param prevLastLogTerm   Term of the log entry immediately preceding the new entries,
+  *                          used for consistency verification.
+  * @param leaderCommit      Index of the last committed log entry on the leader.
+  * @param entries           List of log entries to replicate.
   *
-  * entries = log[prevLogIndex:]
+  * The leader maintains a mapping (sentLength) that tracks the number of log entries sent to each follower.
+  * To construct the log request:
+  *   - Retrieve prevSentLogLength from the sentLength mapping using the follower's identifier.
+  *   - Obtain prevLastLogTerm from the log entry at the index equal to prevSentLogLength.
+  *   - Select the entries from the range [prevSentLogLength, logLength - 1] for replication.
   *
-  * it also need to send the prevLogTerm to the follower so the follower can verify the logs consistency
+  * Including prevLastLogTerm enables the follower to verify the consistency of its log.
   */
 case class LogRequest(
     leaderId: NodeAddress,
     term: Long,
-    prevLogIndex: Long,
-    prevLogTerm: Long,
+    prevSentLogLength: Long,
+    prevLastLogTerm: Long,
     leaderCommit: Long,
     entries: List[LogEntry]
 )

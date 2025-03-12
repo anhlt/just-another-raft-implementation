@@ -8,9 +8,9 @@ import com.grok.raft.core.internal.NodeAddress
   * @param term
   *   the term of the vote request, The value of the term is the currentTerm of the candidate requesting the vote plus
   *   one
-  * @param lastLogIndex
+  * @param logLength
   *   the index of the last log entry
   * @param lastLogTerm
   *   the term of the last log entry
   */
-case class VoteRequest(nodeAddress: NodeAddress, term: Long, lastLogIndex: Long, lastLogTerm: Long)
+case class VoteRequest(nodeAddress: NodeAddress, term: Long, logLength: Long, lastLogTerm: Long)

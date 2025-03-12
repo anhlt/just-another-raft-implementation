@@ -1,13 +1,12 @@
 package com.grok.raft.core.internal
 
-/** State of the log
-  *
-  * @param lastLogIndex
-  *   the index of the last log entry
-  * @param lastLogTerm
-  *   the term of the last log entry
-  * @param lastAppliedIndex
-  *   the index of the last applied log entry
-  */
+/**
+ * Represents the state of the log.
+ *
+ *
+ * @param logLength the length of the log
+ * @param lastLogTerm  the term of the most recent log entry.
+ * @param appliedLogLength the index of the last applied log entry.
+ */
 
-case class LogState(lastLogIndex: Long, lastLogTerm: Option[Long], lastAppliedIndex: Long = 0)
+case class LogState(logLength: Long, lastLogTerm: Option[Long], appliedLogLength: Long = 0)
