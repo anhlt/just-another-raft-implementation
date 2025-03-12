@@ -8,19 +8,24 @@ trait Action
 case class RequestForVote(peerId: NodeAddress, request: VoteRequest) extends Action
 
 /**
-    * Initiates the replication of log entries to a specified follower in the cluster.
-    *
-    * This action encapsulates the logic to distribute a new log entry to a follower.
-    * It also triggers periodic log replication to maintain consistency and serves as a
-    * heartbeat mechanism across cluster nodes. Repeatedly sending log entries ensures
-    * that transient communication failures do not permanently disrupt replication.
-    *
-    * @param peerId   the address of the follower node to which the log entries are sent
-    * @param term     the current term identifier, which is vital for maintaining consistency in the Raft protocol
-    * @param nextIndex the index of the next log entry that should be replicated to the follower
-    */
-    // TODO: Figuringout this should be lenght or index, Maybe in Raft, we will construct the entries using nextIndex
-case class ReplicateLog(peerId: NodeAddress, term: Long, nextIndex: Long) extends Action
+ * Initiates log replication to the specified follower node.
+ *
+ * The leader uses this action to synchronize a follower's log with its own,
+ * ensuring consistency across the cluster. It sends log entries starting from
+ * the specified prefixLength, along with periodic heartbeats to maintain node
+ * connectivity.
+ *
+ * Parameters:
+ *   - peerId: The network address of the follower.
+ *   - term: The current term of the leader, validating the log replication.
+ *   - prefixLength: The log index that indicates where replication should begin.
+ *
+ * Example:
+ *   If a follower's log length is 5 and the leader's log length is 10, the leader
+ *   uses this action to send the log entries beginning at index 5.
+ */
+case class ReplicateLog(peerId: NodeAddress, term: Long, prefixLength: Long) extends Action
+
 
 case class CommitLogs(matchIndex: Map[NodeAddress, Long])                        extends Action
 case class AnnounceLeader(leaderId: NodeAddress, resetPrevious: Boolean = false) extends Action

@@ -63,28 +63,33 @@ sealed trait Node {
       clusterConfiguration: ClusterConfiguration
   ): (Node, List[Action])
 
-  /**
-   * Processes an incoming LogRequest (AppendEntries) message.
-   *
-   * This method performs the following operations:
-   *
-   *   1. Term Update:
-   *      - If the term in the LogRequest exceeds the current term, update the node's term.
-   *      - Clear any previously recorded vote by setting votedFor to None.
-   *
-   *   2. Log Consistency Check:
-   *      - Verify the consistency of the local log with the leader's log.
-   *      - Compare the follower’s log length with the prevSentLogLength provided in the request.
-   *      - If the follower's log is sufficiently long, ensure that the log entry at the prevSentLogLength index matches the prevLogTerm in the request.
-   *      - Reject the request if any inconsistencies, such as gaps or term mismatches, are detected.
-   *
-   * @param logRequest             the log replication request from the leader.
-   * @param logState               the current state of the local log.
-   * @param logEntryAtPrevSent     the log entry at the specified prevSentLogLength.
-   * @param clusterConfiguration   the current cluster configuration details.
-   *
-   * @return                       a tuple consisting of the updated Node state and a tuple of LogRequestResponse along with any generated actions.
-   */
+  /** Processes an incoming LogRequest (AppendEntries) message.
+    *
+    * This method performs the following operations:
+    *
+    *   1. Term Update:
+    *      - If the term in the LogRequest exceeds the current term, update the node's term.
+    *      - Clear any previously recorded vote by setting votedFor to None.
+    *
+    * 2. Log Consistency Check:
+    *   - Verify the consistency of the local log with the leader's log.
+    *   - Compare the follower’s log length with the prevSentLogLength provided in the request.
+    *   - If the follower's log is sufficiently long, ensure that the log entry at the prevSentLogLength index matches
+    *     the prevLogTerm in the request.
+    *   - Reject the request if any inconsistencies, such as gaps or term mismatches, are detected.
+    *
+    * @param logRequest
+    *   the log replication request from the leader.
+    * @param logState
+    *   the current state of the local log.
+    * @param logEntryAtPrevSent
+    *   the log entry at the specified prevSentLogLength.
+    * @param clusterConfiguration
+    *   the current cluster configuration details.
+    *
+    * @return
+    *   a tuple consisting of the updated Node state and a tuple of LogRequestResponse along with any generated actions.
+    */
   def onLogRequest(
       logRequest: LogRequest,
       logState: LogState,
@@ -137,13 +142,13 @@ case class Follower(
     val VoteRequest(
       proposedLeaderAddress,
       candidateTerm,
-      candidateLogLenth,
+      candidateLogLength,
       candidateLastLogTerm
     ) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLenth >= logState.logLength)
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -334,13 +339,13 @@ case class Candidate(
     val VoteRequest(
       proposedLeaderAddress,
       candidateTerm,
-      candidateLogLenth,
+      candidateLogLength,
       candidateLastLogTerm
     ) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLenth >= logState.logLength)
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -524,7 +529,7 @@ case class Leader(
     val address: NodeAddress,
     val currentTerm: Long,
     val sentLenghtMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
-    val ackLenghtMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
+    val ackLengthMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
     val currentLeader: Option[NodeAddress] = None
 ) extends Node {
 
@@ -533,22 +538,33 @@ case class Leader(
       clusterConfiguration: ClusterConfiguration
   ): (Node, List[Action]) = ???
 
-  /** Invoked upon receipt of a VoteRequest.
+  /**
+    * Processes an incoming VoteRequest.
     *
-    * When invoked, the method evaluates the conditions logOK and termOK:
-    *   - If both conditions are true, the node transitions to a follower state.
-    *   - Otherwise, the node retains its leader status, but directs the candidate to switch to a follower state, and
-    *     initiates log replication towards the candidate.
-    *   - The method returns a tuple containing the updated node state and a list of actions to be executed.
+    * This method evaluates two primary conditions:
+    *  - logOK: Ensures that the candidate’s log is at least as up-to-date as the current node's log.
+    *  - termOK: Validates that the candidate's term is acceptable relative to the current node's term.
+    *
+    * Behavior:
+    *  - If both logOK and termOK conditions are met, the node transitions into a follower state, acknowledging
+    *    the candidate’s successful request.
+    *  - If either condition fails, the node maintains its leader state. However, the candidate is instructed
+    *    to transition to a follower state. Additionally, the node initiates log replication towards the candidate.
+    *    This replication (ReplicateLog) ensures that the candidate's log becomes consistent with the leader's log,
+    *    thereby preserving the overall integrity and consistency of the distributed log across the cluster.
+    *    @see [[com.grok.raft.core.protocol.ReplicateLog]]
     *
     * @param voteRequest
-    *   the request message for a vote.
+    *   the incoming request for a vote.
     * @param logState
     *   the current state of the log.
     * @param clusterConfiguration
-    *   the current configuration of the cluster.
+    *   the cluster's current configuration.
     * @return
-    *   a tuple containing the resultant node state and accompanying actions.
+    *   a tuple containing:
+    *     - the updated node state, and
+    *     - a list of actions that need to be executed (which may include instructing the candidate to switch
+    *       to a follower state and initiating the ReplicateLog process to synchronize the candidate's log).
     */
   def onVoteRequest(
       voteRequest: VoteRequest,
@@ -557,22 +573,22 @@ case class Leader(
   ): (Node, (VoteResponse, List[Action])) = {
 
     val VoteRequest(
-      proposedLeaderAddress,
+      candidateAddress,
       candidateTerm,
-      candidateLogLenth,
+      candidateLogLength,
       candidateLastLogTerm
     ) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(currentTerm)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLenth >= logState.logLength)
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
 
     val termOk = candidateTerm > currentTerm
 
     (logOk && termOk) match
       case true =>
         (
-          Follower(address, candidateTerm, Some(proposedLeaderAddress)),
+          Follower(address, candidateTerm, Some(candidateAddress)),
           (
             VoteResponse(address, candidateTerm, logOk && termOk),
             List(StoreState, ResetLeaderAnnouncer)
@@ -580,10 +596,13 @@ case class Leader(
         )
       case false =>
         (
-          this,
+          this.copy(
+            sentLenghtMap = this.sentLenghtMap + (candidateAddress -> candidateLogLength),
+            ackLengthMap = this.ackLengthMap + (candidateAddress   -> candidateLogLength)
+          ),
           (
             VoteResponse(address, currentTerm, logOk && termOk),
-            List.empty[Action]
+            List(ReplicateLog(candidateAddress, currentTerm, candidateLogLength))
           )
         )
 
