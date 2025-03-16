@@ -1,15 +1,7 @@
 package com.grok.raft.core.internal
 
-import com.grok.raft.core.protocol.Action
-import com.grok.raft.core.protocol.VoteRequest
-import com.grok.raft.core.protocol.VoteResponse
-import com.grok.raft.core.protocol.LogRequestResponse
 import com.grok.raft.core.storage.PersistedState
-import com.grok.raft.core.protocol.RequestForVote
-import com.grok.raft.core.protocol.StoreState
-import com.grok.raft.core.protocol.ReplicateLog
-import com.grok.raft.core.protocol.AnnounceLeader
-import com.grok.raft.core.protocol.ResetLeaderAnnouncer
+import com.grok.raft.core.protocol._
 
 /** The Node state represents the State Machine in Raft Protocol The possible states are:
   *   - Follower
@@ -19,7 +11,6 @@ import com.grok.raft.core.protocol.ResetLeaderAnnouncer
 sealed trait Node {
   val address: NodeAddress
   val currentTerm: Long
-  val currentLeader: Option[NodeAddress]
 
   def onTimer(
       logState: LogState,
@@ -126,7 +117,19 @@ case class Follower(
   def onTimer(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, List[Action]) = ???
+  ): (Node, List[Action]) = {
+
+    val (state, actions) = Candidate(address, currentTerm).onTimer(
+      logState,
+      clusterConfiguration
+    )
+
+    if (currentLeader.isDefined){
+      (state,  ResetLeaderAnnouncer :: actions)
+    } else {
+      (state, actions)
+    }
+  }
 
   /** This method is called when a VoteRequest is received
     * @param voteRequest
@@ -295,9 +298,8 @@ case class Follower(
 case class Candidate(
     val address: NodeAddress,
     val currentTerm: Long,
-    val votedFor: Option[NodeAddress],
-    val currentLeader: Option[NodeAddress],
-    val voteReceived: Set[NodeAddress]
+    val votedFor: Option[NodeAddress] = None,
+    val voteReceived: Set[NodeAddress] = Set.empty[NodeAddress]
 ) extends Node {
 
   def onTimer(
@@ -536,23 +538,23 @@ case class Leader(
   def onTimer(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, List[Action]) = ???
+  ): (Node, List[Action]) = (this, List.empty)
 
-  /**
-    * Processes an incoming VoteRequest.
+  /** Processes an incoming VoteRequest.
     *
     * This method evaluates two primary conditions:
-    *  - logOK: Ensures that the candidate’s log is at least as up-to-date as the current node's log.
-    *  - termOK: Validates that the candidate's term is acceptable relative to the current node's term.
+    *   - logOK: Ensures that the candidate’s log is at least as up-to-date as the current node's log.
+    *   - termOK: Validates that the candidate's term is acceptable relative to the current node's term.
     *
     * Behavior:
-    *  - If both logOK and termOK conditions are met, the node transitions into a follower state, acknowledging
-    *    the candidate’s successful request.
-    *  - If either condition fails, the node maintains its leader state. However, the candidate is instructed
-    *    to transition to a follower state. Additionally, the node initiates log replication towards the candidate.
-    *    This replication (ReplicateLog) ensures that the candidate's log becomes consistent with the leader's log,
-    *    thereby preserving the overall integrity and consistency of the distributed log across the cluster.
-    *    @see [[com.grok.raft.core.protocol.ReplicateLog]]
+    *   - If both logOK and termOK conditions are met, the node transitions into a follower state, acknowledging the
+    *     candidate’s successful request.
+    *   - If either condition fails, the node maintains its leader state. However, the candidate is instructed to
+    *     transition to a follower state. Additionally, the node initiates log replication towards the candidate. This
+    *     replication (ReplicateLog) ensures that the candidate's log becomes consistent with the leader's log, thereby
+    *     preserving the overall integrity and consistency of the distributed log across the cluster.
+    * @see
+    *   [[com.grok.raft.core.protocol.ReplicateLog]]
     *
     * @param voteRequest
     *   the incoming request for a vote.
@@ -562,9 +564,9 @@ case class Leader(
     *   the cluster's current configuration.
     * @return
     *   a tuple containing:
-    *     - the updated node state, and
-    *     - a list of actions that need to be executed (which may include instructing the candidate to switch
-    *       to a follower state and initiating the ReplicateLog process to synchronize the candidate's log).
+    *   - the updated node state, and
+    *   - a list of actions that need to be executed (which may include instructing the candidate to switch to a
+    *     follower state and initiating the ReplicateLog process to synchronize the candidate's log).
     */
   def onVoteRequest(
       voteRequest: VoteRequest,
@@ -631,22 +633,117 @@ case class Leader(
       logState: LogState,
       logEntryAtPrevSent: Option[LogEntry],
       clusterConfiguration: ClusterConfiguration
-  ): (Node, (LogRequestResponse, List[Action])) = ???
+  ): (Node, (LogRequestResponse, List[Action])) = {
+
+    if (logRequest.term < currentTerm) {
+      (
+        this,
+        (
+          LogRequestResponse(
+            address,
+            currentTerm,
+            logState.logLength,
+            false
+          ),
+          List.empty[Action]
+        )
+      )
+    } else {
+      val nextState = Follower(
+        address,
+        logRequest.term,
+        currentLeader = Some(logRequest.leaderId)
+      )
+      val actions =
+        List(StoreState, AnnounceLeader(logRequest.leaderId, resetPrevious = true))
+
+      // check if current log on the candidate is long enough by comparing it with prefix Log Length info from leader
+      // and if it long enough, check if the term of at logEntry At PrevLogIndex is the same as the prevLogTerm
+      if (
+        logState.logLength >= logRequest.prevSentLogLength &&
+        logEntryAtPrevSent
+          .map(_.term == logRequest.prevLastLogTerm)
+          .getOrElse(logRequest.prevSentLogLength == 0)
+      ) {
+        (
+          nextState,
+          (
+            LogRequestResponse(
+              address,
+              logRequest.term,
+              logRequest.prevSentLogLength + logRequest.entries.length,
+              true
+            ),
+            actions
+          )
+        )
+
+      } else {
+        (
+          nextState,
+          (
+            LogRequestResponse(
+              address,
+              logRequest.term,
+              0,
+              false
+            ),
+            actions
+          )
+        )
+      }
+    }
+
+  }
 
   def onLogRequestResponse(
       logState: LogState,
       config: ClusterConfiguration,
       msg: LogRequestResponse
-  ): (Node, List[Action]) = ???
+  ): (Node, List[Action]) = {
 
-  def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = ???
+    val LogRequestResponse(fromNodeId, messageTerm, ackLogLength, success) = msg
+
+    if (messageTerm > currentTerm) {
+      (Follower(this.address, messageTerm, None, None), List(StoreState, ResetLeaderAnnouncer))
+    } else {
+      if (success) {
+        (
+          this.copy(
+            sentLenghtMap = sentLenghtMap + (fromNodeId -> ackLogLength),
+            ackLengthMap = ackLengthMap + (fromNodeId   -> ackLogLength)
+          ),
+          List(CommitLogs(ackLengthMap + (fromNodeId -> ackLogLength) + (address -> logState.appliedLogLength)))
+        )
+      } else {
+        val updatedSentLenght = sentLenghtMap.get(fromNodeId) match {
+          case Some(sentLength) if sentLength >= 1 => sentLength - 1
+          case Some(sentLength)                    => 0
+          case None                                => 0
+        }
+
+        (
+          this.copy(sentLenghtMap = sentLenghtMap + (fromNodeId -> updatedSentLenght)),
+          List(StoreState, ReplicateLog(fromNodeId, currentTerm, updatedSentLenght))
+        )
+      }
+
+    }
+
+  }
+
+  def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = {
+    configCluster.members.filter(_ != address).map { node =>
+      ReplicateLog(node, currentTerm, sentLenghtMap.getOrElse(node, 0L))
+    }
+  }
 
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
   ): (Node, LogRequestResponse) = ???
 
-  def leader(): Option[NodeAddress] = ???
+  def leader(): Option[NodeAddress] = Some(address)
 
   def toPersistedState: PersistedState = ???
 
