@@ -2,7 +2,7 @@ import org.typelevel.sbt.tpolecat.*
 
 inThisBuild(
   Seq(
-    scalaVersion := "3.4.0",
+    scalaVersion := "3.6.4",
     organization := "com.grok.raft",
     tpolecatDefaultOptionsMode := VerboseMode
   )
@@ -17,7 +17,9 @@ val commonSettings = Seq(
     Dependencies.catsEffectKernel.value,
     // standard "effect" library (Queues, Console, Random etc.)
     Dependencies.catsEffectStd.value,
-    Dependencies.munitCatsEffect.value
+    Dependencies.munitCatsEffect.value,
+    Dependencies.log4CatsCore.value,
+    Dependencies.log4CatsLog4j.value,
   )
 )
 
@@ -33,7 +35,13 @@ val raft = (project in file("raft-core"))
     name := "raft-core",
     commonSettings
   )
-  .dependsOn(raftGrpc)
+
+val raftCatsEffect = (project in file("raft-cats-effect"))
+  .settings(
+    name := "raft-cats-effect",
+    commonSettings
+  ).dependsOn(raft)
+
 
 lazy val docs = project // new documentation project
   .in(file("just-another-raft-docs")) // important: it must not be docs/
