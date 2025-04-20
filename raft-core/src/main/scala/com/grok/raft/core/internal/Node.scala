@@ -392,7 +392,7 @@ case class Candidate(
 
     if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
       // construct the leader state
-      val sentLenghtMap = clusterConfiguration.members
+      val sentLengthMap = clusterConfiguration.members
         .filter(_ != address)
         .map(node => (node, logLength)) // we think we lenght of log
         .toMap
@@ -403,7 +403,7 @@ case class Candidate(
       val actions = clusterConfiguration.members.map(n => ReplicateLog(n, currentTerm, logLength))
 
       (
-        Leader(address, currentTerm, sentLenghtMap, ackedLengthMap),
+        Leader(address, currentTerm, sentLengthMap, ackedLengthMap),
         StoreState :: AnnounceLeader(address) :: actions
       )
 
@@ -523,13 +523,13 @@ case class Candidate(
  *
  * @param address       The unique network address of the node.
  * @param currentTerm   The term number that the node is currently operating in.
- * @param sentLenghtMap A mapping from each peer node's address to the highest log index that has been transmitted to that peer.
+ * @param sentLengthMap A mapping from each peer node's address to the highest log index that has been transmitted to that peer.
  * @param ackLengthMap  A mapping from each peer node's address to the highest log index that has been confirmed as received by that peer.
 */
 case class Leader(
     val address: NodeAddress,
     val currentTerm: Long,
-    val sentLenghtMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
+    val sentLengthMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
     val ackLengthMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
     val currentLeader: Option[NodeAddress] = None
 ) extends Node {
@@ -598,7 +598,7 @@ case class Leader(
       case false =>
         (
           this.copy(
-            sentLenghtMap = this.sentLenghtMap + (candidateAddress -> candidateLogLength),
+            sentLengthMap = this.sentLengthMap + (candidateAddress -> candidateLogLength),
             ackLengthMap = this.ackLengthMap + (candidateAddress   -> candidateLogLength)
           ),
           (
@@ -695,6 +695,27 @@ case class Leader(
 
   }
 
+  /**
+   * Processes a response to a log replication request from a follower.
+   *
+   * According to the Raft algorithm, when a leader receives a response to an AppendEntries RPC,
+   * it updates its knowledge of the follower's log state. If the request was successful,
+   * the leader updates its nextIndex and matchIndex for the follower. If unsuccessful, the
+   * leader decrements nextIndex and retries.
+   *
+   * This method tracks the replication progress using two key data structures:
+   * - sentLengthMap: Tracks the latest log length that has been sent to each follower.
+   *   This corresponds to the nextIndex concept in the Raft paper.
+   * - ackLengthMap: Tracks the latest log length that has been acknowledged by each follower.
+   *   This corresponds to the matchIndex concept in the Raft paper.
+   *
+   * These maps are used to determine when entries are safely replicated to a majority of the
+   * cluster and can be considered committed.
+   *
+   * Note: This implementation tracks log length instead of log index as described in the Raft paper.
+   * Where the paper uses index (1-based), we use length (0-based). For example, a log length of 3
+   * means there are entries at positions 0, 1, and 2.
+   */
   def onLogRequestResponse(
       logState: LogState,
       config: ClusterConfiguration,
@@ -709,20 +730,20 @@ case class Leader(
       if (success) {
         (
           this.copy(
-            sentLenghtMap = sentLenghtMap + (fromNodeId -> ackLogLength),
+            sentLengthMap = sentLengthMap + (fromNodeId -> ackLogLength),
             ackLengthMap = ackLengthMap + (fromNodeId   -> ackLogLength)
           ),
           List(CommitLogs(ackLengthMap + (fromNodeId -> ackLogLength) + (address -> logState.appliedLogLength)))
         )
       } else {
-        val updatedSentLenght = sentLenghtMap.get(fromNodeId) match {
+        val updatedSentLenght = sentLengthMap.get(fromNodeId) match {
           case Some(sentLength) if sentLength >= 1 => sentLength - 1
           case Some(sentLength)                    => 0
           case None                                => 0
         }
 
         (
-          this.copy(sentLenghtMap = sentLenghtMap + (fromNodeId -> updatedSentLenght)),
+          this.copy(sentLengthMap = sentLengthMap + (fromNodeId -> updatedSentLenght)),
           List(StoreState, ReplicateLog(fromNodeId, currentTerm, updatedSentLenght))
         )
       }
@@ -733,7 +754,7 @@ case class Leader(
 
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = {
     configCluster.members.filter(_ != address).map { node =>
-      ReplicateLog(node, currentTerm, sentLenghtMap.getOrElse(node, 0L))
+      ReplicateLog(node, currentTerm, sentLengthMap.getOrElse(node, 0L))
     }
   }
 
