@@ -124,8 +124,8 @@ case class Follower(
       clusterConfiguration
     )
 
-    if (currentLeader.isDefined){
-      (state,  ResetLeaderAnnouncer :: actions)
+    if (currentLeader.isDefined) {
+      (state, ResetLeaderAnnouncer :: actions)
     } else {
       (state, actions)
     }
@@ -523,10 +523,9 @@ case class Candidate(
  *
  * @param address       The unique network address of the node.
  * @param currentTerm   The term number that the node is currently operating in.
- * @param sentIndex     A mapping from each peer node's address to the highest log index that has been transmitted to that peer.
- * @param ackedIndex    A mapping from each peer node's address to the highest log index that has been confirmed as received by that peer.
- */
-
+ * @param sentLenghtMap A mapping from each peer node's address to the highest log index that has been transmitted to that peer.
+ * @param ackLengthMap  A mapping from each peer node's address to the highest log index that has been confirmed as received by that peer.
+*/
 case class Leader(
     val address: NodeAddress,
     val currentTerm: Long,

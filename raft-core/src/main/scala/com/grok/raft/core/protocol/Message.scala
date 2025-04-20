@@ -1,6 +1,5 @@
 package com.grok.raft.core.protocol
 
-import com.grok.raft.core.internal.Node
 import com.grok.raft.core.internal.NodeAddress
 
 trait Action
