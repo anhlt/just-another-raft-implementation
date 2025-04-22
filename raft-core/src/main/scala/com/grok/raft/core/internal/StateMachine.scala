@@ -1,6 +1,5 @@
 package com.grok.raft.core.internal
 
-import cats.Monad
 import com.grok.raft.core._
 
 
@@ -30,3 +29,4 @@ trait StateMachine[F[_]] :
   def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]]
   def applyRead: PartialFunction[ReadCommand[?], F[Any]]
   def appliedIndex: F[Long]
+

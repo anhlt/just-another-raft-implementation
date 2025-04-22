@@ -101,7 +101,6 @@ trait Log[F[_]]:
     for {
       logEntry <- logStorage.getAtLength(lenght)
       _        <- trace"Committing log entry: ${logEntry}"
-      _        <- logStorage.deleteBefore(logEntry.index)
       _        <- applyCommand(logEntry.index, logEntry.command)
       _        <- setCommitLength(logEntry.index + 1)
       _        <- trace"Log entry committed: ${logEntry}"
