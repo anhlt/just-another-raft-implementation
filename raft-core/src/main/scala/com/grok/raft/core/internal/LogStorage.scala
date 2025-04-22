@@ -2,7 +2,9 @@ package com.grok.raft.core.internal
 
 trait LogStorage[F[_]]:
 
-  def lastIndex: F[Long]
+  def currentLength: F[Long]
+
+  def getAtLength(lenght: Long): F[LogEntry] = get(lenght - 1)
 
   def get(index: Long): F[LogEntry]
 

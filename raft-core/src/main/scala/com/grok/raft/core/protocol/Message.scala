@@ -26,7 +26,7 @@ case class RequestForVote(peerId: NodeAddress, request: VoteRequest) extends Act
 case class ReplicateLog(peerId: NodeAddress, term: Long, prefixLength: Long) extends Action
 
 
-case class CommitLogs(matchIndex: Map[NodeAddress, Long])                        extends Action
+case class CommitLogs(ackLengthMap: Map[NodeAddress, Long])                        extends Action
 case class AnnounceLeader(leaderId: NodeAddress, resetPrevious: Boolean = false) extends Action
 
 /**

@@ -86,7 +86,11 @@ trait Raft[F[_]] {
           } yield ()
         }
 
-      case commitLogs: CommitLogs         => ???
+      case CommitLogs(ackLengthMap) =>
+        for {
+          committed <- log.commitLogs(ackLengthMap)
+          _         <- if (committed) storeState() else Monad[F].unit
+      } yield ()
       case announceLeader: AnnounceLeader => ???
       case ResetLeaderAnnouncer           => ???
       case StoreState                     => ???
@@ -217,4 +221,5 @@ trait Raft[F[_]] {
       }
   }
 
+  def storeState()(using Monad[F], Logger[F]): F[Unit] = ???
 }
