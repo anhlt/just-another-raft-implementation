@@ -119,8 +119,11 @@ trait Log[F[_]]:
 
     output.flatMap(result =>
       deferreds.get(index) match {
-        case Some(deferred) => deferred.complete(result) *> Monad[F].pure(deferreds.remove(index))
+        case Some(deferred) => deferred.complete(result) *>  Monad[F].pure(deferreds.remove(index)) *> Monad[F].unit
         case None           => Monad[F].unit
       }
     )
   }
+
+  def applyReadCommand[T](command: ReadCommand[?])(using Monad[F]) : F[T] = 
+    stateMachine.applyRead.apply(command).asInstanceOf[F[T]]

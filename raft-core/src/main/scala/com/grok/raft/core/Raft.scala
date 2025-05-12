@@ -56,7 +56,7 @@ trait Raft[F[_]] {
       _        <- delayElection()
       logState <- log.state
       cluster  <- membershipManager.getClusterConfiguration
-      actions  <- modifyState(_.onTimer(logState, cluster))
+      actions  <- modifyState(node => node.onTimer(logState, cluster))
       _        <- runActions(actions)
     } yield ()
 
@@ -90,7 +90,7 @@ trait Raft[F[_]] {
         for {
           committed <- log.commitLogs(ackLengthMap)
           _         <- if (committed) storeState() else Monad[F].unit
-      } yield ()
+        } yield ()
       case announceLeader: AnnounceLeader => ???
       case ResetLeaderAnnouncer           => ???
       case StoreState                     => ???
@@ -162,7 +162,18 @@ trait Raft[F[_]] {
   def deferred[A]: F[Deferred[F, A]] = ???
 
   def onCommand[T](c: Command[T])(using Monad[F], Logger[F]): F[T] = c match {
-    case cmd: ReadCommand[T] => ???
+    case cmd: ReadCommand[T] =>
+      for {
+        node <- currentNode
+        result <- node match
+          case leader: Leader => log.applyReadCommand(cmd)
+          case _ =>
+            for {
+              leaderNode <- leaderAnnouncer.listen()
+              rs         <- rpcClient.send(leaderNode.address, cmd)
+            } yield rs
+      } yield (result)
+
     case cmd: WriteCommand[T] =>
       for {
         deferred <- deferred[T]
@@ -220,6 +231,7 @@ trait Raft[F[_]] {
         } yield List.empty
       }
   }
+
 
   def storeState()(using Monad[F], Logger[F]): F[Unit] = ???
 }
