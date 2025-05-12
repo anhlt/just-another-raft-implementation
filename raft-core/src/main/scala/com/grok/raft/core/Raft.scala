@@ -56,7 +56,7 @@ trait Raft[F[_]] {
       _        <- delayElection()
       logState <- log.state
       cluster  <- membershipManager.getClusterConfiguration
-      actions  <- modifyState(_.onTimer(logState, cluster))
+      actions  <- modifyState(node => node.onTimer(logState, cluster))
       _        <- runActions(actions)
     } yield ()
 

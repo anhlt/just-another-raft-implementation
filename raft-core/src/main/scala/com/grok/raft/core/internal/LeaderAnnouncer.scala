@@ -22,6 +22,7 @@ package com.grok.raft.core.internal
   * Both thread-safety and single-assignment are preserved by using `Ref` and `Deferred` as the building blocks in a
   * Cats Effect environment.
   */
+  
 trait LeaderAnnouncer[F[_]]:
 
   /** Announce the newly-elected leader to all listeners.
