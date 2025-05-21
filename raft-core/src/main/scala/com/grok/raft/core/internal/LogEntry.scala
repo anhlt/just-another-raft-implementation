@@ -4,10 +4,11 @@ import com.grok.raft.core.Command
 
 /** Represents a single entry in the Raft log.
   */
-trait LogEntry {
+trait LogEntryI {
   val term: Long
   val index: Long
   val command: Command[?]
-}
+  val position: Long = index + 1
+} 
 
-case class LogEntryGeneral(term: Long, index: Long, command: Command[?]) extends LogEntry
+case class LogEntry(term: Long, index: Long, command: Command[?]) extends LogEntryI

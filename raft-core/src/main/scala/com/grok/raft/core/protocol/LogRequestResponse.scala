@@ -29,8 +29,8 @@ import com.grok.raft.core.internal.NodeAddress
  *   true if the append was successful, false otherwise
  */
 case class LogRequestResponse(
-    nodeId: NodeAddress,
-    currentTerm: Long,
-    ackLogLenght: Long,
-    success: Boolean
+    val nodeId: NodeAddress,
+    val currentTerm: Long,
+    val ackLogLenght: Long,
+    val success: Boolean
 )

@@ -6,9 +6,9 @@ trait LogStorage[F[_]]:
 
   def currentLength: F[Long]
 
-  def getAtLength(lenght: Long): F[LogEntry] = get(lenght - 1)
+  def getAtLength(lenght: Long): F[Option[LogEntry]] = get(lenght - 1)
 
-  def get(index: Long): F[LogEntry]
+  def get(index: Long): F[Option[LogEntry]]
 
   def put(index: Long, logEntry: LogEntry): F[LogEntry]
 

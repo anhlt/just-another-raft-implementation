@@ -1,11 +1,12 @@
 package com.grok.raft.core.internal
 
-import com.grok.raft.core._
-import com.grok.raft.core.internal.storage._
-import cats._
-import cats.implicits._
+import cats.*
+import cats.implicits.*
+import com.grok.raft.core.*
+import com.grok.raft.core.internal.storage.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.syntax.*
+
 import scala.collection.concurrent.TrieMap
 
 trait Log[F[_]]:
@@ -20,37 +21,68 @@ trait Log[F[_]]:
 
   val stateMachine: StateMachine[F]
 
-  /**
-   * Methods to access and modify the commit index.
-   * The commit index represents the highest log entry known to be committed in the Raft consensus.
-   * 
-   * Implementation note: These operations should be atomic to ensure consistency
-   * in a concurrent environment.
-   */
+  /** Methods to access and modify the commit index. The commit index represents the highest log entry known to be
+    * committed in the Raft consensus.
+    *
+    * Implementation note: These operations should be atomic to ensure consistency in a concurrent environment.
+    */
 
-  /**
-   * Retrieves the current commit index.
-   *
-   * @return The current commit index wrapped in effect type F
-   */
+  /** Retrieves the current commit index.
+    *
+    * @return
+    *   The current commit index wrapped in effect type F
+    */
   def getCommittedLength: F[Long]
 
-
-  /**
-   * Updates the commit index to a new value.
-   *
-   * @param index The new commit index value
-   * @return Unit wrapped in effect type F
-   */
+  /** Updates the commit index to a new value.
+    *
+    * @param index
+    *   The new commit index value
+    * @return
+    *   Unit wrapped in effect type F
+    */
   def setCommitLength(index: Long): F[Unit]
 
   def state: F[LogState]
+
+  def get(index: Long): F[Option[LogEntry]] =
+    logStorage.get(index)
+
+  def truncateInconsistencyLog(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using Monad[F], Logger[F]): F[Unit] =
+    if(entries.nonEmpty && currentLogLength > leaderPrevLogLength) {
+      for {
+        lastEntryOnCurrentNode <- logStorage.getAtLength(currentLogLength)
+        result <- if(lastEntryOnCurrentNode.isDefined && lastEntryOnCurrentNode.get.term != entries.head.term) 
+          logStorage.deleteAfter(leaderPrevLogLength) 
+        else Monad[F].unit
+
+      } yield result
+
+    } else {
+      Monad[F].unit
+    }
+
+  def putEntries(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using Monad[F], Logger[F]) : F[Unit] = ??? 
+
+  def appendEntries(entries: List[LogEntry], leaderPrevLogLength: Long, leaderCommit: Long)(using Monad[F], Logger[F]) : F[Boolean] = 
+    transactional {
+      for {
+        currentLogLength <- logStorage.currentLength
+        appliedLength <- getCommittedLength
+        _ <- truncateInconsistencyLog(entries, leaderPrevLogLength, currentLogLength)
+        _ <- putEntries(entries, leaderPrevLogLength, currentLogLength)
+        committed <- (appliedLength to leaderCommit).toList.traverse(commitLog)
+
+        _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
+      } yield committed.nonEmpty
+    }
+
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T])(using Monad[F], Logger[F]): F[LogEntry] =
     transactional {
       for {
         lastIndex <- logStorage.currentLength
-        logEntry = LogEntryGeneral(term, lastIndex + 1, command)
+        logEntry = LogEntry(term, lastIndex + 1, command)
         _ <- trace"Appending a command to the log. Term: ${term}, Index: ${lastIndex + 1}"
         _ <- logStorage.put(logEntry.index, logEntry)
         _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
@@ -78,21 +110,20 @@ trait Log[F[_]]:
       _              <- trace"Current length: $currentLength, Committed length: $commitedLength"
       _              <- trace"Received ackLengthMap: $ackLengthMap"
       _              <- trace"Checking for quorum"
-
-      _ <- trace"Committing"
-    } yield (true)
+      commited       <- (commitedLength to currentLength).toList.traverse(commitIfMatch(ackLengthMap, _))
+    } yield commited.contains(true)
   }
 
   def commitIfMatch(ackedLengthMap: Map[NodeAddress, Long], lenght: Long)(using
       Monad[F],
       Logger[F]
-  ): F[Unit] = {
+  ): F[Boolean] = {
     for {
       config <- membershipManager.getClusterConfiguration
       ackedCount = ackedLengthMap.count { case (_, length) => length >= lenght }
-      _ <- trace"ackedCount: ${ackedCount}, config: ${config.members.size}"
-      _ <- if (ackedCount >= config.quorumSize) commitLog(lenght) *> Monad[F].pure(true) else Monad[F].pure(false)
-    } yield ()
+      _      <- trace"ackedCount: ${ackedCount}, config: ${config.members.size}"
+      result <- if (ackedCount >= config.quorumSize) commitLog(lenght) *> Monad[F].pure(true) else Monad[F].pure(false)
+    } yield (result)
   }
 
   def commitLog(lenght: Long)(using
@@ -102,8 +133,8 @@ trait Log[F[_]]:
     for {
       logEntry <- logStorage.getAtLength(lenght)
       _        <- trace"Committing log entry: ${logEntry}"
-      _        <- applyCommand(logEntry.index, logEntry.command)
-      _        <- setCommitLength(logEntry.index + 1)
+      _        <- applyCommand(logEntry.get.index, logEntry.get.command)
+      _        <- setCommitLength(logEntry.get.index + 1)
       _        <- trace"Log entry committed: ${logEntry}"
     } yield ()
   }
@@ -120,11 +151,13 @@ trait Log[F[_]]:
 
     output.flatMap(result =>
       deferreds.get(index) match {
-        case Some(deferred) => deferred.complete(result) *>  Monad[F].pure(deferreds.remove(index)) *> Monad[F].unit
+        case Some(deferred) => deferred.complete(result) *> Monad[F].pure(deferreds.remove(index)) *> Monad[F].unit
         case None           => Monad[F].unit
       }
     )
   }
 
-  def applyReadCommand[T](command: ReadCommand[?])(using Monad[F]) : F[T] = 
+  def applyReadCommand[T](command: ReadCommand[?])(using Monad[F]): F[T] =
     stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
+
+  def compactLogs(): F[Unit] = ???

@@ -98,6 +98,28 @@ trait Raft[F[_]] {
     }
   }
 
+  def onLogRequest(msg: LogRequest)(using Monad[F], Logger[F]): F[LogRequestResponse] = {
+    for {
+      _        <- trace"A AppendEntriesRequest received from ${msg.leaderId} with term ${msg.term}"
+      logState <- log.state
+      config   <- membershipManager.getClusterConfiguration
+      logPrevSent <- log.get(msg.prevSentLogLength - 1)
+      (response, actions)<- modifyState(_.onLogRequest(msg, logState,logPrevSent,  config))
+      _ <- updateLastHeartbeat
+      _        <- runActions(actions)
+              appended <-
+          if (response.success) {
+            for {
+              appended <- log.appendEntries(msg.entries, msg.prevLogIndex, msg.leaderCommit)
+            } yield appended
+          } else
+            Monad[F].pure(false)
+
+    } yield response
+  }
+
+
+
   def onLogRequestResponse(msg: LogRequestResponse)(using Monad[F], Logger[F]): F[Unit] =
     for {
       _        <- trace"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}"
