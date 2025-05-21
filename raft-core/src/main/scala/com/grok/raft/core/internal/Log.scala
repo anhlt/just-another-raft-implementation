@@ -48,13 +48,41 @@ trait Log[F[_]]:
   def get(index: Long): F[Option[LogEntry]] =
     logStorage.get(index)
 
-  def truncateInconsistencyLog(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using Monad[F], Logger[F]): F[Unit] =
-    if(entries.nonEmpty && currentLogLength > leaderPrevLogLength) {
+    /** Truncates log entries that are inconsistent with the leader's log to ensure safe appending of new entries. This
+      * method is part of the log replication process in the Raft consensus algorithm, helping to maintain log
+      * consistency by detecting and removing divergent entries. It implements the inconsistency resolution step from
+      * the AppendEntries RPC.
+      *
+      * @param entries
+      *   The list of incoming log entries from the leader, used to check for term mismatches.
+      * @param leaderPrevLogLength
+      *   The index of the log entry in the leader's log immediately preceding the new entries.
+      * @param currentLogLength
+      *   The current length of the local log, to identify the last entry for comparison.
+      * @return
+      *   F[Unit] An effect that performs the truncation operation if an inconsistency is found, or does nothing
+      *   otherwise.
+      * @usecases
+      *   Used during AppendEntries RPC handling (step 2 and 3 in Figure 2 of the Raft paper) to resolve log conflicts
+      *   before appending new entries.
+      * @see
+      *   Section 5.3 and Figure 2 of the Raft paper for the consistency check and truncation logic.
+      * @note
+      *   This operation enforces the Log Matching Property by deleting entries after detecting term conflicts, ensuring
+      *   safety in distributed consensus.
+      */
+
+  def truncateInconsistencyLog(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using
+      Monad[F],
+      Logger[F]
+  ): F[Unit] =
+    if (entries.nonEmpty && currentLogLength > leaderPrevLogLength) {
       for {
         lastEntryOnCurrentNode <- logStorage.getAtLength(currentLogLength)
-        result <- if(lastEntryOnCurrentNode.isDefined && lastEntryOnCurrentNode.get.term != entries.head.term) 
-          logStorage.deleteAfter(leaderPrevLogLength) 
-        else Monad[F].unit
+        result <-
+          if (lastEntryOnCurrentNode.isDefined && lastEntryOnCurrentNode.get.term != entries.head.term)
+            logStorage.deleteAfter(leaderPrevLogLength)
+          else Monad[F].unit
 
       } yield result
 
@@ -62,21 +90,72 @@ trait Log[F[_]]:
       Monad[F].unit
     }
 
-  def putEntries(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using Monad[F], Logger[F]) : F[Unit] = ??? 
+  /** Appends new log entries to the local log after handling any necessary truncation for inconsistencies. This method
+    * is a helper function in the log replication process, likely used internally within AppendEntries handling. It
+    * assumes that any prior inconsistencies have been resolved (e.g., via truncateInconsistencyLog) and focuses on
+    * storing the entries in the log storage. Based on Raft's log replication, this ensures that entries are added
+    * atomically and in order, supporting the leader's role in maintaining a consistent replicated log.
+    *
+    * @param entries
+    *   The list of log entries to append to the log.
+    * @param leaderPrevLogLength
+    *   The index up to which the log is known to be consistent, used to position new entries correctly.
+    * @param currentLogLength
+    *   The current length of the local log, for reference in appending or updating the log state.
+    * @return
+    *   F[Unit] An effect that performs the append operation; it does not return a value but may handle errors or
+    *   logging.
+    * @usecases
+    *   Invoked after inconsistency checks in AppendEntries RPC to add new entries to the log storage.
+    * @note
+    *   Inferred from Raft's AppendEntries mechanism (Section 5.3), where entries are appended only after confirming
+    *   consistency. This function may involve transactional updates to ensure durability, as described in the paper's
+    *   commitment rules.
+    */
+  def putEntries(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using
+      Monad[F],
+      Logger[F]
+  ): F[Unit] = ???
 
-  def appendEntries(entries: List[LogEntry], leaderPrevLogLength: Long, leaderCommit: Long)(using Monad[F], Logger[F]) : F[Boolean] = 
+  /** Appends new log entries received from the leader, ensuring log consistency and handling commitment. This method
+    * implements the AppendEntries RPC mechanism from the Raft consensus algorithm, which is used to replicate log
+    * entries and detect/resolve inconsistencies. It performs a consistency check, truncates any conflicting entries if
+    * necessary, and updates the commit index if provided by the leader.
+    *
+    * @param entries
+    *   The list of log entries to append, each containing a command and its associated term.
+    * @param leaderPrevLogLength
+    *   The index of the log entry in the leader's log immediately preceding the new entries, used for consistency
+    *   checking (corresponds to prevLogIndex in Raft).
+    * @param leaderCommit
+    *   The leader's commit index, indicating the highest log entry known to be committed by the leader.
+    * @return
+    *   F[Boolean] An effect that returns true if the append operation was successful (e.g., entries were appended and
+    *   no conflicts were found), false otherwise. This reflects the success condition in Raft's AppendEntries RPC.
+    * @usecases
+    *   Called during the AppendEntries RPC handling to synchronize logs between leader and followers.
+    * @see
+    *   Section 5.3 of the Raft paper for the detailed RPC mechanism, including steps for conflict detection and
+    *   resolution.
+    * @note
+    *   This operation depends on Monad and Logger effects for asynchronous behavior and logging. It ensures the Log
+    *   Matching Property by rejecting or truncating inconsistent logs.
+    */
+  def appendEntries(entries: List[LogEntry], leaderPrevLogLength: Long, leaderCommit: Long)(using
+      Monad[F],
+      Logger[F]
+  ): F[Boolean] =
     transactional {
       for {
         currentLogLength <- logStorage.currentLength
-        appliedLength <- getCommittedLength
-        _ <- truncateInconsistencyLog(entries, leaderPrevLogLength, currentLogLength)
-        _ <- putEntries(entries, leaderPrevLogLength, currentLogLength)
-        committed <- (appliedLength to leaderCommit).toList.traverse(commitLog)
+        appliedLength    <- getCommittedLength
+        _                <- truncateInconsistencyLog(entries, leaderPrevLogLength, currentLogLength)
+        _                <- putEntries(entries, leaderPrevLogLength, currentLogLength)
+        committed        <- (appliedLength to leaderCommit).toList.traverse(commitLog)
 
-        _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
+        _ <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
       } yield committed.nonEmpty
     }
-
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T])(using Monad[F], Logger[F]): F[LogEntry] =
     transactional {
