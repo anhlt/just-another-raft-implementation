@@ -1,4 +1,6 @@
-package com.grok.raft.core.internal
+package com.grok.raft.core.internal.storage
+
+import com.grok.raft.core.internal._
 
 trait LogStorage[F[_]]:
 

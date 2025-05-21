@@ -1,6 +1,7 @@
 package com.grok.raft.core.internal
 
 import com.grok.raft.core._
+import com.grok.raft.core.internal.storage._
 import cats._
 import cats.implicits._
 import org.typelevel.log4cats.Logger

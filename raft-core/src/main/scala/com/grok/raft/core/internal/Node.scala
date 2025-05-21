@@ -1,6 +1,6 @@
 package com.grok.raft.core.internal
 
-import com.grok.raft.core.storage.PersistedState
+import com.grok.raft.core.storage._
 import com.grok.raft.core.protocol._
 
 /** The Node state represents the State Machine in Raft Protocol The possible states are:
