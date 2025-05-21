@@ -1,0 +1,31 @@
+name: Scala Steward
+
+on:
+  schedule:
+    # Runs every Sunday at midnight UTC — adjust as needed
+    - cron: "0 0 * * 0"
+  # Allow manual trigger from the GitHub UI
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  scala-steward:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+      - name: Launch Scala Steward
+        uses: scala-steward-org/scala-steward-action@v2
+        with:
+          # Use a GitHub personal access token with repo permissions here
+          github-token: ${{ secrets.SCALA_STEWARD_GITHUB_TOKEN }}
+          # Optionally specify branch(es) to update, defaults to the default branch
+          # branches: develop
+          # Optionally, a file listing multiple repositories (for centralized usage)
+          # repos-file: REPOSITORIES.md
+          # Optionally set author info for commit PRs
+          author-name: Scala Steward
+          author-email: scala-steward@example.com

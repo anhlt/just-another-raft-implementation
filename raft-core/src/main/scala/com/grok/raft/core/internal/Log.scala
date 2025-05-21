@@ -102,7 +102,6 @@ trait Log[F[_]]:
     for {
       logEntry <- logStorage.getAtLength(lenght)
       _        <- trace"Committing log entry: ${logEntry}"
-      _        <- logStorage.deleteBefore(logEntry.index)
       _        <- applyCommand(logEntry.index, logEntry.command)
       _        <- setCommitLength(logEntry.index + 1)
       _        <- trace"Log entry committed: ${logEntry}"
@@ -121,8 +120,11 @@ trait Log[F[_]]:
 
     output.flatMap(result =>
       deferreds.get(index) match {
-        case Some(deferred) => deferred.complete(result) *> Monad[F].pure(deferreds.remove(index))
+        case Some(deferred) => deferred.complete(result) *>  Monad[F].pure(deferreds.remove(index)) *> Monad[F].unit
         case None           => Monad[F].unit
       }
     )
   }
+
+  def applyReadCommand[T](command: ReadCommand[?])(using Monad[F]) : F[T] = 
+    stateMachine.applyRead.apply(command).asInstanceOf[F[T]]

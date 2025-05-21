@@ -518,14 +518,50 @@ case class Candidate(
 
 }
 
-/*
- * The Leader state defines the behavior of a node serving as the leader in the Raft consensus protocol.
- *
- * @param address       The unique network address of the node.
- * @param currentTerm   The term number that the node is currently operating in.
- * @param sentLengthMap A mapping from each peer node's address to the highest log index that has been transmitted to that peer.
- * @param ackLengthMap  A mapping from each peer node's address to the highest log index that has been confirmed as received by that peer.
-*/
+/** Represents the behavior and state of a Raft node when it is acting as the leader.
+  *
+  * A leader in Raft is responsible for:
+  *   - Managing log replication to follower nodes,
+  *   - Handling client commands and appending them to the replicated log,
+  *   - Maintaining leadership authority via periodic heartbeats,
+  *   - Tracking the highest log entries replicated and committed,
+  *   - Responding to term changes and stepping down if a higher-term leader is detected.
+  *
+  * This implementation tracks two key maps:
+  *   - `sentLengthMap`: The highest log index sent to each follower (equivalent to `nextIndex` in the Raft paper),
+  *   - `ackLengthMap`: The highest log index acknowledged (matched) by each follower (equivalent to `matchIndex`).
+  *
+  * These mappings are used to determine when log entries are safely replicated on a majority and can be considered
+  * committed (Raft Paper §5.3, §5.4).
+  *
+  * Leadership safety properties enforced here include:
+  *   - Only one leader per term exists (Election Safety, Raft Paper §5.2),
+  *   - Leaders never overwrite committed entries (Leader Completeness Property, Raft Paper §5.4.3),
+  *   - Committed entries are durable and applied in order (State Machine Safety, Raft Paper §5.4).
+  *
+  * This class also handles stepping down to a follower on discovering a higher term from other nodes, guaranteeing
+  * system consistency in the presence of partitions or term changes.
+  *
+  * @param address
+  *   The unique network address of the leader node.
+  * @param currentTerm
+  *   The term number the leader is operating in.
+  * @param sentLengthMap
+  *   Tracks the highest log entry index sent to each follower (equivalent to `nextIndex`, Raft Paper Figure 2).
+  * @param ackLengthMap
+  *   Tracks the highest log entry index acknowledged by each follower (equivalent to `matchIndex`).
+  * @param currentLeader
+  *   (Optionally) the current leader address (usually self).
+  *
+  * @see
+  *   Raft Paper, Section 5.3 (Log Replication)
+  * @see
+  *   Raft Paper, Section 5.4 (Safety)
+  * @see
+  *   Raft Paper, Section 5.2 (Leader Election)
+  * @see
+  *   Distributed Systems Lecture, Section 6.2 (Leader Responsibilities and Log Replication Safety)
+  */
 case class Leader(
     val address: NodeAddress,
     val currentTerm: Long,
@@ -573,40 +609,33 @@ case class Leader(
       clusterConfiguration: ClusterConfiguration
   ): (Node, (VoteResponse, List[Action])) = {
 
-    val VoteRequest(
-      candidateAddress,
-      candidateTerm,
-      candidateLogLength,
-      candidateLastLogTerm
-    ) = voteRequest
+    val VoteRequest(candidateAddress, candidateTerm, candidateLogLength, candidateLastLogTerm) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(currentTerm)
+
+    // Check if candidate’s log is at least as up-to-date as leader’s log (§5.4)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
+      (candidateLastLogTerm > lastLogTerm) ||
+        (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
 
     val termOk = candidateTerm > currentTerm
 
-    (logOk && termOk) match
-      case true =>
-        (
-          Follower(address, candidateTerm, Some(candidateAddress)),
-          (
-            VoteResponse(address, candidateTerm, logOk && termOk),
-            List(StoreState, ResetLeaderAnnouncer)
-          )
-        )
-      case false =>
-        (
-          this.copy(
-            sentLengthMap = this.sentLengthMap + (candidateAddress -> candidateLogLength),
-            ackLengthMap = this.ackLengthMap + (candidateAddress   -> candidateLogLength)
-          ),
-          (
-            VoteResponse(address, currentTerm, logOk && termOk),
-            List(ReplicateLog(candidateAddress, currentTerm, candidateLogLength))
-          )
-        )
-
+    if (logOk && termOk) {
+      // New legitimate leader detected: step down to follower and reset leader state
+      val newState = Follower(address, candidateTerm, Some(candidateAddress))
+      val response = VoteResponse(address, candidateTerm, true)
+      val actions  = List(StoreState, ResetLeaderAnnouncer) // persist and reset leadership
+      (newState, (response, actions))
+    } else {
+      // Reject vote but update replication progress for candidate to help log sync
+      val updatedSentLengthMap = this.sentLengthMap + (candidateAddress -> candidateLogLength)
+      val updatedAckLengthMap  = this.ackLengthMap + (candidateAddress  -> candidateLogLength)
+      val newState             = this.copy(sentLengthMap = updatedSentLengthMap, ackLengthMap = updatedAckLengthMap)
+      val response             = VoteResponse(address, currentTerm, false)
+      // Trigger replication to help candidate catch up
+      val actions = List(ReplicateLog(candidateAddress, currentTerm, candidateLogLength))
+      (newState, (response, actions))
+    }
   }
 
   /** This method is called when a VoteResponse is received
@@ -621,11 +650,9 @@ case class Leader(
       clusterConfiguration: ClusterConfiguration
   ): (Node, List[Action]) = ???
 
-  /** This method is called when a LogRequest is received
-    * @param logRequest
-    * @param logState
-    * @param clusterConfiguration
-    * @return
+  /** Handles incoming AppendEntries (log replication) RPCs from another leader. If a higher term is detected, leader
+    * steps down to follower to maintain Election Safety. Otherwise, replies with success or failure according to log
+    * consistency checks.
     */
   def onLogRequest(
       logRequest: LogRequest,
@@ -635,87 +662,85 @@ case class Leader(
   ): (Node, (LogRequestResponse, List[Action])) = {
 
     if (logRequest.term < currentTerm) {
-      (
-        this,
-        (
-          LogRequestResponse(
-            address,
-            currentTerm,
-            logState.logLength,
-            false
-          ),
-          List.empty[Action]
-        )
-      )
+      // RPC term is stale: reject replication request
+      val response = LogRequestResponse(address, currentTerm, logState.logLength, success = false)
+      (this, (response, List.empty))
     } else {
-      val nextState = Follower(
-        address,
-        logRequest.term,
-        currentLeader = Some(logRequest.leaderId)
-      )
-      val actions =
-        List(StoreState, AnnounceLeader(logRequest.leaderId, resetPrevious = true))
+      // Higher or equal term from another leader or candidate: step down to follower
+      // When stepping down to follower due to a higher term leader (leaderId),
+      // we must inform the system about the new leader and reset any previous leadership state.
+      // This prevents the system from holding stale leadership information which could cause conflicts or stale reads.
+      //
+      // Setting `resetPrevious = true` signals that any cached or remembered leader info should be cleared,
+      // ensuring listeners or components observing leadership see the fresh and correct leader.
+      //
+      // Also, persisting state via StoreState guarantees durability of the updated term and leadership changes,
+      // which is critical before announcing a new leader to prevent inconsistencies after crashes.
+      //
+      // This is aligned with Raft Paper §5.2 (Election Safety) ensuring at most one leader per term,
+      // and distributed systems principles around safe state propagation during role changes.
+      val nextState = Follower(address, logRequest.term, currentLeader = Some(logRequest.leaderId))
+      val actions   = List(StoreState, AnnounceLeader(logRequest.leaderId, resetPrevious = true))
 
-      // check if current log on the candidate is long enough by comparing it with prefix Log Length info from leader
-      // and if it long enough, check if the term of at logEntry At PrevLogIndex is the same as the prevLogTerm
-      if (
-        logState.logLength >= logRequest.prevSentLogLength &&
-        logEntryAtPrevSent
-          .map(_.term == logRequest.prevLastLogTerm)
-          .getOrElse(logRequest.prevSentLogLength == 0)
-      ) {
-        (
-          nextState,
-          (
-            LogRequestResponse(
-              address,
-              logRequest.term,
-              logRequest.prevSentLogLength + logRequest.entries.length,
-              true
-            ),
-            actions
-          )
+      val logLengthCheck = logState.logLength >= logRequest.prevSentLogLength
+      val termMatch =
+        logEntryAtPrevSent.map(_.term == logRequest.prevLastLogTerm).getOrElse(logRequest.prevSentLogLength == 0)
+
+      if (logLengthCheck && termMatch) {
+        // Log is consistent; accept entries
+        val response = LogRequestResponse(
+          address,
+          logRequest.term,
+          logRequest.prevSentLogLength + logRequest.entries.length,
+          success = true
         )
-
+        (nextState, (response, actions))
       } else {
-        (
-          nextState,
-          (
-            LogRequestResponse(
-              address,
-              logRequest.term,
-              0,
-              false
-            ),
-            actions
-          )
-        )
+        // Log inconsistency: reject entries
+        val response = LogRequestResponse(address, logRequest.term, 0, success = false)
+        (nextState, (response, actions))
       }
     }
-
   }
 
-  /**
-   * Processes a response to a log replication request from a follower.
-   *
-   * According to the Raft algorithm, when a leader receives a response to an AppendEntries RPC,
-   * it updates its knowledge of the follower's log state. If the request was successful,
-   * the leader updates its nextIndex and matchIndex for the follower. If unsuccessful, the
-   * leader decrements nextIndex and retries.
-   *
-   * This method tracks the replication progress using two key data structures:
-   * - sentLengthMap: Tracks the latest log length that has been sent to each follower.
-   *   This corresponds to the nextIndex concept in the Raft paper.
-   * - ackLengthMap: Tracks the latest log length that has been acknowledged by each follower.
-   *   This corresponds to the matchIndex concept in the Raft paper.
-   *
-   * These maps are used to determine when entries are safely replicated to a majority of the
-   * cluster and can be considered committed.
-   *
-   * Note: This implementation tracks log length instead of log index as described in the Raft paper.
-   * Where the paper uses index (1-based), we use length (0-based). For example, a log length of 3
-   * means there are entries at positions 0, 1, and 2.
-   */
+  /** Handles the response to a log replication request (AppendEntries RPC) from a follower.
+    *
+    * method has critical responsibilities for maintaining the leader's view of followers' logs, updating replication
+    * indexes, retrying replication on failure, and committing entries once replicated on a majority, thereby preserving
+    * Raft's safety and liveness properties.
+    *
+    * The method performs the following:
+    *   1. Detects if the follower reports a higher term, which triggers the leader to step down, ensuring Election
+    *      Safety (§5.2). 2. On success:
+    *      - Updates the sent and acknowledged log indices (equivalent to `nextIndex` and `matchIndex` in the Raft paper
+    *        Figure 2).
+    *      - Triggers commit of log entries that have been replicated on a majority, upholding Leader Completeness
+    *        (§5.4.3).
+    *      3. On failure (usually due to log inconsistencies):
+    *      - Decreases the sent index for the follower (`nextIndex`) to retry replication with earlier log entries,
+    *        implementing Raft’s backtracking mechanism to resolve conflicts (§5.3).
+    *      - Initiates a new replication action with the updated prefixLength.
+    *
+    * @param logState
+    *   Current local log state of the leader including the last applied index.
+    * @param config
+    *   Full cluster membership information, used to determine quorum.
+    * @param msg
+    *   LogRequestResponse from a follower, indicating success or failure of a replication attempt.
+    *
+    * @return
+    *   A tuple of updated `Node` (leader with adjusted replication state or follower after stepping down) and a list of
+    *   protocol `Action`s that include committing logs, retrying replication, or stepping down.
+    *
+    * @see
+    *   Raft Paper, Figure 2 (nextIndex, matchIndex)
+    * @see
+    *   Raft Paper, Section 5.2 (Election Safety)
+    * @see
+    *   Raft Paper, Section 5.3 (Log Replication Backtracking)
+    * @see
+    *   Raft Paper, Section 5.4.3 (Leader Completeness Property)
+    */
   def onLogRequestResponse(
       logState: LogState,
       config: ClusterConfiguration,
@@ -725,31 +750,38 @@ case class Leader(
     val LogRequestResponse(fromNodeId, messageTerm, ackLogLength, success) = msg
 
     if (messageTerm > currentTerm) {
-      (Follower(this.address, messageTerm, None, None), List(StoreState, ResetLeaderAnnouncer))
+      // Step down if follower reports higher term to maintain Election Safety (§5.2)
+      val newState = Follower(address, messageTerm, None, None)
+      // Persist new state and reset leader announcer to start fresh elections if needed
+      (newState, List(StoreState, ResetLeaderAnnouncer))
     } else {
       if (success) {
-        (
-          this.copy(
-            sentLengthMap = sentLengthMap + (fromNodeId -> ackLogLength),
-            ackLengthMap = ackLengthMap + (fromNodeId   -> ackLogLength)
-          ),
-          List(CommitLogs(ackLengthMap + (fromNodeId -> ackLogLength) + (address -> logState.appliedLogLength)))
-        )
-      } else {
-        val updatedSentLenght = sentLengthMap.get(fromNodeId) match {
-          case Some(sentLength) if sentLength >= 1 => sentLength - 1
-          case Some(sentLength)                    => 0
-          case None                                => 0
-        }
+        // Replication succeeded: update sent and ack maps with follower’s ack length
+        val newSentLengthMap = sentLengthMap + (fromNodeId -> ackLogLength)
+        val newAckLengthMap  = ackLengthMap + (fromNodeId  -> ackLogLength)
 
+        // Combine with self’s applied log length to determine commit indices
+        val combinedAckMap = newAckLengthMap + (address -> logState.appliedLogLength)
+
+        // Trigger commit action: entries replicated on majority can now be applied (§5.4)
+        val commitAction = CommitLogs(combinedAckMap)
+        (this.copy(sentLengthMap = newSentLengthMap, ackLengthMap = newAckLengthMap), List(commitAction))
+
+      } else {
+        // Replication failed: decrease sentLength (nextIndex) for follower and retry (§5.3)
+        val updatedSentLength = sentLengthMap.get(fromNodeId) match {
+          case Some(sentLength) if sentLength > 0 => sentLength - 1
+          case _                                  => 0L
+        }
+        val newSentLengthMap = sentLengthMap + (fromNodeId -> updatedSentLength)
+
+        // Retry log replication with lower prefixLength for conflict resolution
         (
-          this.copy(sentLengthMap = sentLengthMap + (fromNodeId -> updatedSentLenght)),
-          List(StoreState, ReplicateLog(fromNodeId, currentTerm, updatedSentLenght))
+          this.copy(sentLengthMap = newSentLengthMap),
+          List(StoreState, ReplicateLog(fromNodeId, currentTerm, updatedSentLength))
         )
       }
-
     }
-
   }
 
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = {
