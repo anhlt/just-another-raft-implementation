@@ -110,7 +110,7 @@ trait Raft[F[_]] {
               appended <-
           if (response.success) {
             for {
-              appended <- log.appendEntries(msg.entries, msg.prevLogIndex, msg.leaderCommit)
+              appended <- log.appendEntries(msg.entries, msg.prevSentLogLength, msg.leaderCommit)
             } yield appended
           } else
             Monad[F].pure(false)

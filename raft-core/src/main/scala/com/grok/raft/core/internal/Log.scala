@@ -249,4 +249,4 @@ trait Log[F[_]]:
   def applyReadCommand[T](command: ReadCommand[?])(using Monad[F]): F[T] =
     stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
 
-  def compactLogs(): F[Unit] = ???
+  def compactLogs(): F[Unit] 
