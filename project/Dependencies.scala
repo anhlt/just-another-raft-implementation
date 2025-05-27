@@ -4,8 +4,8 @@ import org.portablescala.sbtplatformdeps.PlatformDepsPlugin.autoImport._
 object Dependencies {
 
   val catsCore         = Def.setting("org.typelevel" %% "cats-core" % "2.13.0")
-  val log4CatsCore     = Def.setting("org.typelevel" %% "log4cats-slf4j" % "2.7.0")
-  val log4CatsLog4j    = Def.setting("org.typelevel" %% "log4cats-slf4j" % "2.7.0")
+  val log4CatsCore     = Def.setting("org.typelevel" %% "log4cats-slf4j" % "2.7.1")
+  val log4CatsLog4j    = Def.setting("org.typelevel" %% "log4cats-slf4j" % "2.7.1")
   val catsEffect       = Def.setting("org.typelevel" %% "cats-effect" % "3.5.7")
   val catsEffectKernel = Def.setting("org.typelevel" %% "cats-effect-kernel" % "3.5.7")
   val catsEffectStd    = Def.setting("org.typelevel" %% "cats-effect-std" % "3.5.7")
