@@ -115,7 +115,17 @@ trait Log[F[_]]:
   def putEntries(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using
       Monad[F],
       Logger[F]
-  ): F[Unit] = ???
+  ): F[Unit] = 
+    val logEntries = if (leaderPrevLogLength + entries.size > currentLogLength) {
+      entries.drop((currentLogLength - leaderPrevLogLength).toInt)
+    } else List.empty[LogEntry]
+
+    logEntries.traverse { entry =>
+      logStorage.put(entry.index, entry) *> trace"Entry appended: ${entry}"
+    }.void
+  
+
+
 
   /** Appends new log entries received from the leader, ensuring log consistency and handling commitment. This method
     * implements the AppendEntries RPC mechanism from the Raft consensus algorithm, which is used to replicate log
