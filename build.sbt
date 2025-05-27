@@ -2,8 +2,8 @@ import org.typelevel.sbt.tpolecat.*
 
 inThisBuild(
   Seq(
-    scalaVersion := "3.6.4",
-    organization := "com.grok.raft",
+    scalaVersion               := "3.7.0",
+    organization               := "com.grok.raft",
     tpolecatDefaultOptionsMode := VerboseMode
   )
 )
@@ -25,7 +25,7 @@ val commonSettings = Seq(
     Dependencies.munit.value,
     Dependencies.scalaCheck.value,
     Dependencies.munitScalaCheck.value,
-    Dependencies.munitScalaCheckEffect.value,
+    Dependencies.munitScalaCheckEffect.value
   )
 )
 
@@ -46,19 +46,17 @@ val raftCatsEffect = (project in file("raft-cats-effect"))
   .settings(
     name := "raft-cats-effect",
     commonSettings
-  ).dependsOn(raft)
-
+  )
+  .dependsOn(raft)
 
 lazy val docs = project // new documentation project
   .in(file("just-another-raft-docs")) // important: it must not be docs/
   .dependsOn(raft)
   .settings(
-    moduleName := "just-another-raft-docs",
-    mdocVariables := Map("VERSION" -> version.value),
+    moduleName    := "just-another-raft-docs",
+    mdocVariables := Map("VERSION" -> version.value)
   )
   .enablePlugins(MdocPlugin, DocusaurusPlugin)
-
-
 
 val root = (project in file("."))
   .settings(
