@@ -15,30 +15,7 @@ import com.grok.raft.core.internal.StateMachine
 import com.grok.raft.core._
 import com.grok.raft.core.internal.{Node, Leader, NodeAddress}
 import com.grok.raft.core.internal.Deferred
-
 import com.grok.raft.core.error.Error
-given ioMonadErrorForError: MonadError[IO,  Error] = new MonadError[IO, Error] {
-  def pure[A](x: A): IO[A]               = IO.pure(x)
-  def flatMap[A, B](fa: IO[A])(f: A => IO[B]): IO[B] = fa.flatMap(f)
-  def tailRecM[A, B](a: A)(f: A => IO[Either[A, B]]): IO[B] = 
-    // check if the input is a Left or Right
-    f(a).flatMap {
-      case Left(nextA) => tailRecM(nextA)(f)
-      case Right(b)    => IO.pure(b)
-    }
-
-  def raiseError[A](e: Error): IO[A]      = IO.raiseError(e) // Error must be Throwable
-
-  override def handleErrorWith[A](fa: IO[A])(f: Error => IO[A]): IO[A] =
-    fa.handleErrorWith {
-      case e: Error => f(e)
-      case other    => IO.raiseError(other)
-    }
-
-  // handleError: fallback to `handleErrorWith` + `pure`
-  override def handleError[A](fa: IO[A])(f: Error => A): IO[A] =
-    handleErrorWith(fa)(e => IO.pure(f(e)))
-}
 
 
 object NoOp extends ReadCommand[Unit]
@@ -54,9 +31,6 @@ class LogSpec extends CatsEffectSuite {
 
     override def get(index: Long): F[Option[LogEntry]] =
       ref.get.map(_.get(index))
-
-    override def getAtLength(length: Long): F[Option[LogEntry]] =
-      get(length)
 
     override def put(index: Long, entry: LogEntry): F[LogEntry] =
       ref.update(_ + (index -> entry)).as(entry)
@@ -78,6 +52,30 @@ class LogSpec extends CatsEffectSuite {
     override def appliedIndex: F[Long] = Sync[F].pure(0L)
 
   }
+
+  given ioMonadErrorForError: MonadError[IO,  Error] = new MonadError[IO, Error] {
+    def pure[A](x: A): IO[A]               = IO.pure(x)
+    def flatMap[A, B](fa: IO[A])(f: A => IO[B]): IO[B] = fa.flatMap(f)
+    def tailRecM[A, B](a: A)(f: A => IO[Either[A, B]]): IO[B] = 
+      // check if the input is a Left or Right
+      f(a).flatMap {
+        case Left(nextA) => tailRecM(nextA)(f)
+        case Right(b)    => IO.pure(b)
+      }
+
+    def raiseError[A](e: Error): IO[A]      = IO.raiseError(e) // Error must be Throwable
+
+    override def handleErrorWith[A](fa: IO[A])(f: Error => IO[A]): IO[A] =
+      fa.handleErrorWith {
+        case e: Error => f(e)
+        case other    => IO.raiseError(other)
+      }
+
+    // handleError: fallback to `handleErrorWith` + `pure`
+    override def handleError[A](fa: IO[A])(f: Error => A): IO[A] =
+      handleErrorWith(fa)(e => IO.pure(f(e)))
+  }
+
 
 
   // 2) A tiny TestLog that only wires in our in‐memory storage.

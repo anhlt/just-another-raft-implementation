@@ -221,6 +221,7 @@ trait Log[F[_]]:
       Logger[F]
   ): F[Unit] = {
     for {
+      _ <- trace"Attempting to commit log entry at length: ${lenght}"
       logEntry <- logStorage.getAtLength(lenght)
       _        <- logEntry match {
         case Some(entry) => Monad[F].pure(entry)
