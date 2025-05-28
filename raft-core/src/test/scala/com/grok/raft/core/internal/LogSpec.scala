@@ -69,13 +69,26 @@ class LogSpec extends CatsEffectSuite {
   object TestLog {
     // a default 3‐node cluster with quorum=2
     val defaultMembershipManager = new MembershipManager[IO] {
-      def getClusterConfiguration: IO[ClusterConfiguration] =
-        IO.pure(
+
+      val configurationRef: Ref[IO, ClusterConfiguration] =
+        Ref.unsafe[IO, ClusterConfiguration](
           ClusterConfiguration(
             currentNode = Leader(currentTerm = 1L, address = NodeAddress("n1", 9090)),
             members = List(NodeAddress("n1", 9090), NodeAddress("n2", 9090), NodeAddress("n3", 9090))
           )
         )
+
+      override def members: IO[Set[Node]] = IO.pure(
+        Set(
+          Leader(currentTerm = 1L, address = NodeAddress("n1", 9090)),
+          Follower(currentTerm = 1L, address = NodeAddress("n2", 9090)),
+          Follower(currentTerm = 1L, address = NodeAddress("n3", 9090))
+        )
+      )
+
+      override def setClusterConfiguration(newConfig: ClusterConfiguration): IO[Unit] = configurationRef.set(newConfig)
+
+      def getClusterConfiguration: IO[ClusterConfiguration] = configurationRef.get
     }
   }
 
