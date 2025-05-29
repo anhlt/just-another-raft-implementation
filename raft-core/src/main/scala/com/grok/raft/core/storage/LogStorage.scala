@@ -15,3 +15,5 @@ trait LogStorage[F[_]]:
   def deleteBefore(index: Long): F[Unit]
 
   def deleteAfter(index: Long): F[Unit]
+
+  def truncateList(maxLenght: Long): F[Unit] = deleteAfter(maxLenght - 1)
