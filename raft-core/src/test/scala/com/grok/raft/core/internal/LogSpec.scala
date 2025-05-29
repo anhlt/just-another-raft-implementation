@@ -15,7 +15,7 @@ import com.grok.raft.core.internal.StateMachine
 import com.grok.raft.core._
 import com.grok.raft.core.internal.{Node, Leader, NodeAddress}
 import com.grok.raft.core.internal.Deferred
-import com.grok.raft.core.error.Error
+import com.grok.raft.core.error.BaseError
 
 
 object NoOp extends ReadCommand[Unit]
@@ -53,7 +53,7 @@ class LogSpec extends CatsEffectSuite {
 
   }
 
-  given ioMonadErrorForError: MonadError[IO,  Error] = new MonadError[IO, Error] {
+  given ioMonadErrorForError: MonadError[IO,  BaseError] = new MonadError[IO, BaseError] {
     def pure[A](x: A): IO[A]               = IO.pure(x)
     def flatMap[A, B](fa: IO[A])(f: A => IO[B]): IO[B] = fa.flatMap(f)
     def tailRecM[A, B](a: A)(f: A => IO[Either[A, B]]): IO[B] = 
@@ -63,16 +63,16 @@ class LogSpec extends CatsEffectSuite {
         case Right(b)    => IO.pure(b)
       }
 
-    def raiseError[A](e: Error): IO[A]      = IO.raiseError(e) // Error must be Throwable
+    def raiseError[A](e: BaseError): IO[A]      = IO.raiseError(e) // Error must be Throwable
 
-    override def handleErrorWith[A](fa: IO[A])(f: Error => IO[A]): IO[A] =
+    override def handleErrorWith[A](fa: IO[A])(f: BaseError => IO[A]): IO[A] =
       fa.handleErrorWith {
-        case e: Error => f(e)
+        case e: BaseError => f(e)
         case other    => IO.raiseError(other)
       }
 
     // handleError: fallback to `handleErrorWith` + `pure`
-    override def handleError[A](fa: IO[A])(f: Error => A): IO[A] =
+    override def handleError[A](fa: IO[A])(f: BaseError => A): IO[A] =
       handleErrorWith(fa)(e => IO.pure(f(e)))
   }
 
