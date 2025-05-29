@@ -153,7 +153,7 @@ trait Log[F[_]]:
     *   Matching Property by rejecting or truncating inconsistent logs.
     */
   def appendEntries(entries: List[LogEntry], leaderPrevLogLength: Long, leaderCommit: Long)(using
-      MonadError[F, BaseError],
+      MonadThrow[F],
       Logger[F]
   ): F[Boolean] =
     transactional {
@@ -168,7 +168,7 @@ trait Log[F[_]]:
       } yield committed.nonEmpty
     }
 
-  def append[T](term: Long, command: Command[T], deferred: Deferred[F, T])(using MonadError[F, BaseError], Logger[F]): F[LogEntry] =
+  def append[T](term: Long, command: Command[T], deferred: Deferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
     transactional {
       for {
         lastIndex <- logStorage.currentLength
@@ -193,7 +193,7 @@ trait Log[F[_]]:
     * @return
     *   A wrapped boolean value indicating whether any new entries were committed (true) or not (false)
     */
-  def commitLogs(ackLengthMap: Map[NodeAddress, Long])(using MonadError[F, BaseError], Logger[F]): F[Boolean] = {
+  def commitLogs(ackLengthMap: Map[NodeAddress, Long])(using MonadThrow[F], Logger[F]): F[Boolean] = {
     for {
       currentLength  <- logStorage.currentLength
       commitedLength <- getCommittedLength
@@ -205,7 +205,7 @@ trait Log[F[_]]:
   }
 
   def commitIfMatch(ackedLengthMap: Map[NodeAddress, Long], lenght: Long)(using
-      MonadError[F, BaseError],
+      MonadThrow[F],
       Logger[F]
   ): F[Boolean] = {
     for {
@@ -217,7 +217,7 @@ trait Log[F[_]]:
   }
 
   def commitLog(lenght: Long)(using
-      MonadError[F, BaseError],
+      MonadThrow[F],
       Logger[F]
   ): F[Unit] = {
     for {
@@ -225,7 +225,7 @@ trait Log[F[_]]:
       logEntry <- logStorage.getAtLength(lenght)
       _        <- logEntry match {
         case Some(entry) => Monad[F].pure(entry)
-        case None        => MonadError[F, BaseError].raiseError(LogError("Log entry not found for commit."))
+        case None        => MonadThrow[F].raiseError(LogError("Log entry not found for commit."))
       }
       _        <- trace"Committing log entry: ${logEntry}"
       _        <- applyCommand(logEntry.get.index, logEntry.get.command)
@@ -234,7 +234,7 @@ trait Log[F[_]]:
     } yield ()
   }
 
-  def applyCommand(index: Long, command: Command[?])(using MonadError[F, BaseError]): F[Unit] = {
+  def applyCommand(index: Long, command: Command[?])(using MonadThrow[F]): F[Unit] = {
     val output = command match {
 
       case command: ReadCommand[_] =>
@@ -252,7 +252,7 @@ trait Log[F[_]]:
     )
   }
 
-  def applyReadCommand[T](command: ReadCommand[?])(using MonadError[F, BaseError]): F[T] =
+  def applyReadCommand[T](command: ReadCommand[?])(using MonadThrow[F]): F[T] =
     stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
 
   def compactLogs(): F[Unit] 

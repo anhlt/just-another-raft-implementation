@@ -38,7 +38,7 @@ trait Raft[F[_]] {
 
   def rpcClient: RpcClient[F]
 
-  def start()(using MonadError[F, BaseError], Logger[F]): F[Unit] = {
+  def start()(using MonadThrow[F], Logger[F]): F[Unit] = {
     for {
       _      <- trace"Starting Raft"
       _      <- delayElection()
@@ -52,7 +52,7 @@ trait Raft[F[_]] {
     } yield ()
   }
 
-  def runElection()(using MonadError[F, BaseError], Logger[F]): F[Unit] =
+  def runElection()(using MonadThrow[F], Logger[F]): F[Unit] =
     for {
       _        <- delayElection()
       logState <- log.state
@@ -61,17 +61,17 @@ trait Raft[F[_]] {
       _        <- runActions(actions)
     } yield ()
 
-  def modifyState[B](f: Node => (Node, B))(using MonadError[F, BaseError], Logger[F]): F[B] =
+  def modifyState[B](f: Node => (Node, B))(using MonadThrow[F], Logger[F]): F[B] =
     for {
       currentState <- currentNode
       (newState, actions) = f(currentState)
       _ <- setCurrentNode(newState)
     } yield (actions)
 
-  def runActions(actions: List[Action])(using MonadError[F, BaseError], Logger[F]): F[Unit] =
+  def runActions(actions: List[Action])(using MonadThrow[F], Logger[F]): F[Unit] =
     actions.traverse(action => runAction(action)) *> Monad[F].unit
 
-  def runAction(action: Action)(using MonadError[F, BaseError], Logger[F]): F[Unit] = {
+  def runAction(action: Action)(using MonadThrow[F], Logger[F]): F[Unit] = {
     action match {
       case reqForVote: RequestForVote =>
         for {
@@ -99,7 +99,7 @@ trait Raft[F[_]] {
     }
   }
 
-  def onLogRequest(msg: LogRequest)(using MonadError[F, BaseError], Logger[F]): F[LogRequestResponse] = {
+  def onLogRequest(msg: LogRequest)(using MonadThrow[F], Logger[F]): F[LogRequestResponse] = {
     for {
       _        <- trace"A AppendEntriesRequest received from ${msg.leaderId} with term ${msg.term}"
       logState <- log.state
@@ -121,7 +121,7 @@ trait Raft[F[_]] {
 
 
 
-  def onLogRequestResponse(msg: LogRequestResponse)(using MonadError[F, BaseError], Logger[F]): F[Unit] =
+  def onLogRequestResponse(msg: LogRequestResponse)(using MonadThrow[F], Logger[F]): F[Unit] =
     for {
       _        <- trace"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}"
       logState <- log.state
@@ -131,7 +131,7 @@ trait Raft[F[_]] {
       _        <- runActions(actions)
     } yield ()
 
-  def onVoteRequest(msg: VoteRequest)(using MonadError[F, BaseError], Logger[F]): F[VoteResponse] = {
+  def onVoteRequest(msg: VoteRequest)(using MonadThrow[F], Logger[F]): F[VoteResponse] = {
     for {
       _                   <- trace"A Vote request received from ${msg.nodeAddress}, Term: ${msg.lastLogTerm}, ${msg}"
       logState            <- log.state
@@ -144,7 +144,7 @@ trait Raft[F[_]] {
     } yield response
   }
 
-  def onVoteResponse(msg: VoteResponse)(using MonadError[F, BaseError], Logger[F]): F[Unit] =
+  def onVoteResponse(msg: VoteResponse)(using MonadThrow[F], Logger[F]): F[Unit] =
     for {
       _        <- trace"A Vote response received from ${msg.nodeAddress}, Granted: ${msg.voteGranted}, ${msg}"
       logState <- log.state
@@ -153,7 +153,7 @@ trait Raft[F[_]] {
       _        <- runActions(actions)
     } yield ()
 
-  def scheduleElection()(using MonadError[F, BaseError], Logger[F]): F[Unit] = {
+  def scheduleElection()(using MonadThrow[F], Logger[F]): F[Unit] = {
     background {
       schedule(config.heartbeatTimeoutMillis.milliseconds) {
         for {
@@ -164,7 +164,7 @@ trait Raft[F[_]] {
     }
   }
 
-  def scheduleReplication()(using MonadError[F, BaseError], Logger[F]): F[Unit] = {
+  def scheduleReplication()(using MonadThrow[F], Logger[F]): F[Unit] = {
     background {
       schedule(config.heartbeatIntervalMillis.milliseconds) {
         for {
@@ -176,15 +176,15 @@ trait Raft[F[_]] {
       }
     }
   }
-
-  def background[A](fa: => F[A])(using MonadError[F, BaseError]): F[Unit]
+  
+  def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit]
 
   def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit]
 
   // Function to create a deferred computation
   def deferred[A]: F[Deferred[F, A]] = ???
 
-  def onCommand[T](c: Command[T])(using MonadError[F, BaseError], Logger[F]): F[T] = c match {
+  def onCommand[T](c: Command[T])(using MonadThrow[F], Logger[F]): F[T] = c match {
     case cmd: ReadCommand[T] =>
       for {
         node <- currentNode
@@ -232,7 +232,7 @@ trait Raft[F[_]] {
     *   A wrapped effect that yields a list of actions to be performed after the command is processed.
     */
   private def onWriteCommand[T](node: Node, cmd: WriteCommand[T], deferred: Deferred[F, T])(using
-      MonadError[F, BaseError],
+      MonadThrow[F],
       Logger[F]
   ): F[List[Action]] = {
     node match

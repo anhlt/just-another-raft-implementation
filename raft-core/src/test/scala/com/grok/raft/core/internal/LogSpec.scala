@@ -1,82 +1,14 @@
 package com.grok.raft.core.internal
 
-import cats.effect.*
-import cats.effect.kernel.Ref
-import munit.CatsEffectSuite
-import cats.implicits.*
 import cats.*
-import org.typelevel.log4cats.Logger
-import org.typelevel.log4cats.noop.NoOpLogger
+import cats.effect.*
 import cats.effect.kernel.{Deferred => EffectDeferred}
-
-// Bring your domain types into scope
+import cats.effect.kernel.*
+import com.grok.raft.core.*
 import com.grok.raft.core.internal.storage.LogStorage
-import com.grok.raft.core.internal.StateMachine
-import com.grok.raft.core._
-import com.grok.raft.core.internal.{Node, Leader, NodeAddress}
-import com.grok.raft.core.internal.Deferred
-import com.grok.raft.core.error.BaseError
-
-
-object NoOp extends ReadCommand[Unit]
+import munit.CatsEffectSuite
 
 class LogSpec extends CatsEffectSuite {
-
-  // 1) An in‐memory LogStorage
-  class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
-
-    override def deleteBefore(index: Long): F[Unit] = ???
-
-    private val ref = Ref.unsafe[F, Map[Long, LogEntry]](Map.empty)
-
-    override def get(index: Long): F[Option[LogEntry]] =
-      ref.get.map(_.get(index))
-
-    override def put(index: Long, entry: LogEntry): F[LogEntry] =
-      ref.update(_ + (index -> entry)).as(entry)
-
-    override def deleteAfter(index: Long): F[Unit] =
-      ref.update(_.filter { case (k, _) => k <= index })
-
-    override def currentLength: F[Long] =
-      ref.get.map(_.size.toLong)
-  }
-
-  class InMemoryStateMachine[F[_]: Sync] extends StateMachine[F] {
-    // In‐memory state machine that does nothing
-
-    override def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]] = { _ => Sync[F].pure(true) }
-
-    override def applyRead: PartialFunction[ReadCommand[?], F[Any]] = { _ => Sync[F].pure(true) }
-
-    override def appliedIndex: F[Long] = Sync[F].pure(0L)
-
-  }
-
-  given ioMonadErrorForError: MonadError[IO,  BaseError] = new MonadError[IO, BaseError] {
-    def pure[A](x: A): IO[A]               = IO.pure(x)
-    def flatMap[A, B](fa: IO[A])(f: A => IO[B]): IO[B] = fa.flatMap(f)
-    def tailRecM[A, B](a: A)(f: A => IO[Either[A, B]]): IO[B] = 
-      // check if the input is a Left or Right
-      f(a).flatMap {
-        case Left(nextA) => tailRecM(nextA)(f)
-        case Right(b)    => IO.pure(b)
-      }
-
-    def raiseError[A](e: BaseError): IO[A]      = IO.raiseError(e) // Error must be Throwable
-
-    override def handleErrorWith[A](fa: IO[A])(f: BaseError => IO[A]): IO[A] =
-      fa.handleErrorWith {
-        case e: BaseError => f(e)
-        case other    => IO.raiseError(other)
-      }
-
-    // handleError: fallback to `handleErrorWith` + `pure`
-    override def handleError[A](fa: IO[A])(f: BaseError => A): IO[A] =
-      handleErrorWith(fa)(e => IO.pure(f(e)))
-  }
-
-
 
   // 2) A tiny TestLog that only wires in our in‐memory storage.
   //    Everything else (membershipManager, stateMachine, transactional, commitLog, etc.) is stubbed out.
@@ -84,7 +16,7 @@ class LogSpec extends CatsEffectSuite {
     // real in‐memory storage
     override val logStorage = new InMemoryLogStorage[IO]
     // these are never called in our tests, so null is okay
-    override val membershipManager = TestLog.defaultMembershipManager
+    override val membershipManager = new DummyMembershipManager[IO]
     override val stateMachine      = new InMemoryStateMachine[IO]
 
     // identity transaction
@@ -99,41 +31,12 @@ class LogSpec extends CatsEffectSuite {
     override def state: IO[LogState] = IO.pure(LogState(0, None, 0))
 
     // Stubs for the methods referenced by appendEntries (not needed here)
-    def compactLogs(): IO[Unit]          = IO.unit
+    def compactLogs(): IO[Unit] = IO.unit
   }
-
-  object TestLog {
-    // a default 3‐node cluster with quorum=2
-    val defaultMembershipManager = new MembershipManager[IO] {
-
-      val configurationRef: Ref[IO, ClusterConfiguration] =
-        Ref.unsafe[IO, ClusterConfiguration](
-          ClusterConfiguration(
-            currentNode = Leader(currentTerm = 1L, address = NodeAddress("n1", 9090)),
-            members = List(NodeAddress("n1", 9090), NodeAddress("n2", 9090), NodeAddress("n3", 9090))
-          )
-        )
-
-      override def members: IO[Set[Node]] = IO.pure(
-        Set(
-          Leader(currentTerm = 1L, address = NodeAddress("n1", 9090)),
-          Follower(currentTerm = 1L, address = NodeAddress("n2", 9090)),
-          Follower(currentTerm = 1L, address = NodeAddress("n3", 9090))
-        )
-      )
-
-      override def setClusterConfiguration(newConfig: ClusterConfiguration): IO[Unit] = configurationRef.set(newConfig)
-
-      def getClusterConfiguration: IO[ClusterConfiguration] = configurationRef.get
-    }
-  }
-
-
 
   // we need an implicit Logger[IO] for putEntries
-  given logger: Logger[IO] = NoOpLogger[IO]
 
-  var emptyDefer = new Deferred[IO, Unit] {
+  var emptyDefer = new com.grok.raft.core.internal.Deferred[IO, Unit] {
 
     val deffered = EffectDeferred.unsafe[IO, Unit]
 
@@ -236,8 +139,7 @@ class LogSpec extends CatsEffectSuite {
       _ = assertEquals(beforeLen, 0L)
 
       // append a NoOp command at term=42
-      entry    <- log.append(42L, NoOp, emptyDefer)(using ioMonadErrorForError, logger)
-
+      entry    <- log.append(42L, NoOp, emptyDefer)
       afterLen <- log.logStorage.currentLength
 
       stored <- log.logStorage.get(entry.index)
