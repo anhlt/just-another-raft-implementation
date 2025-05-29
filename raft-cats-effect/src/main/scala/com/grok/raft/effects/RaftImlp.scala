@@ -21,9 +21,7 @@ class RaftImlp[F[_]: {Sync, Temporal}](
     lastHeartbeatRef: Ref[F, Long],
 ) extends Raft[F]:
 
-
-
-  override def background[A](fa: => F[A])(using MonadError[F, com.grok.raft.core.error.BaseError]): F[Unit] = ???
+  override def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit] = ???
 
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = 
     for {
