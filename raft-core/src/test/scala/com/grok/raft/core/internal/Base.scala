@@ -1,7 +1,7 @@
 package com.grok.raft.core.internal
 
 import cats.effect.*
-import cats.effect.kernel.Ref
+import cats.effect.kernel.*
 import cats.implicits.*
 import cats.*
 
@@ -9,9 +9,9 @@ import cats.*
 import com.grok.raft.core.internal.storage.LogStorage
 import com.grok.raft.core.internal.*
 import com.grok.raft.core.*
-import com.grok.raft.core.error.*
 import org.typelevel.log4cats.Logger
-import org.typelevel.log4cats.noop.NoOpLogger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+import com.grok.raft.core.protocol.*
 
 object NoOp extends ReadCommand[Unit]
 
@@ -67,4 +67,80 @@ class DummyMembershipManager[F[_]: Sync] extends MembershipManager[F]:
   override def setClusterConfiguration(newConfig: ClusterConfiguration): F[Unit] = configurationRef.set(newConfig)
   override def getClusterConfiguration: F[ClusterConfiguration] = configurationRef.get
 
-given logger: Logger[IO] = NoOpLogger[IO]
+given logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+
+
+
+
+// ----------------------------------------------------------------
+// STUB LEADER ANNOUNCER
+// ----------------------------------------------------------------
+class StubLeaderAnnouncer[F[_]: Concurrent] private (deferred: Deferred[F, NodeAddress])
+    extends LeaderAnnouncer[F] {
+
+  override def announce(leader: NodeAddress): F[Unit] =
+    // Complete only once; further completes are no‐ops
+    deferred.complete(leader).void
+
+  override def listen(): F[NodeAddress] =
+    // Block until `announce` is called
+    deferred.get
+
+  override def reset(): F[Unit] =
+    // Not used in our tests
+    Concurrent[F].unit
+}
+
+object StubLeaderAnnouncer {
+  def create[F[_]: Concurrent]: F[StubLeaderAnnouncer[F]] =
+    Deferred[F, NodeAddress].map(new StubLeaderAnnouncer[F](_))
+}
+
+
+
+class StubRpcClient[F[_]: Sync](voteMap: Map[NodeAddress, Boolean]) extends RpcClient[F] {
+
+  override def send[T](serverId: NodeAddress, command: Command[T]): F[T] = ???
+
+  override def join(serverId: NodeAddress, newNode: NodeAddress): F[Boolean] = ???
+
+  override def closeConnections(): F[Unit] = ???
+
+  override def send(peer: NodeAddress, req: VoteRequest): F[VoteResponse] =
+    Sync[F].delay {
+      VoteResponse(peer, req.term, voteMap.getOrElse(peer, false))
+    }
+
+  override def send(peer: NodeAddress, req: LogRequest): F[LogRequestResponse] =
+    Sync[F].pure(LogRequestResponse(peer, req.term, req.entries.length, true))
+}
+
+class DummyLogPropagator[F[_]: Sync] extends LogPropagator[F] {
+  override def propagateLogs(
+      peer: NodeAddress,
+      term: Long,
+      prefixLength: Long
+  ): F[LogRequestResponse] =
+    Sync[F].pure(LogRequestResponse(peer, term,  prefixLength, success = true))
+}
+
+class InMemoryLog[F[_]: Sync] extends Log[F] {
+    override val logStorage = new InMemoryLogStorage[F]
+    // these are never called in our tests, so null is okay
+    override val membershipManager = new DummyMembershipManager[F]
+    override val stateMachine      = new InMemoryStateMachine[F]
+
+    // identity transaction
+    override def transactional[A](t: => F[A]): F[A] = t
+
+    // commit‐index stored in a Ref so we can observe it if we wanted
+    private val commitRef                           = Ref.unsafe[F, Long](0L)
+    override def getCommittedLength: F[Long]       = commitRef.get
+    override def setCommitLength(i: Long): F[Unit] = commitRef.set(i)
+
+    // Not used in these tests
+    override def state: F[LogState] = Sync[F].pure(LogState(0, None, 0))
+
+    // Stubs for the methods referenced by appendEntries (not needed here)
+    def compactLogs(): F[Unit] = Sync[F].unit
+}

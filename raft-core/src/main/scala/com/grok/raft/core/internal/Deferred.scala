@@ -1,7 +1,7 @@
 package com.grok.raft.core.internal
 
 
-trait Deferred[F[_], A] :
+trait RaftDeferred[F[_], A] :
 
   def get: F[A]
 

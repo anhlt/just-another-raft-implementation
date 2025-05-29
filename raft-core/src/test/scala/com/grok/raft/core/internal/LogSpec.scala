@@ -3,40 +3,14 @@ package com.grok.raft.core.internal
 import cats.*
 import cats.effect.*
 import cats.effect.kernel.{Deferred => EffectDeferred}
-import cats.effect.kernel.*
 import com.grok.raft.core.*
-import com.grok.raft.core.internal.storage.LogStorage
 import munit.CatsEffectSuite
+
 
 class LogSpec extends CatsEffectSuite {
 
-  // 2) A tiny TestLog that only wires in our in‐memory storage.
-  //    Everything else (membershipManager, stateMachine, transactional, commitLog, etc.) is stubbed out.
-  class TestLog extends Log[IO] {
-    // real in‐memory storage
-    override val logStorage = new InMemoryLogStorage[IO]
-    // these are never called in our tests, so null is okay
-    override val membershipManager = new DummyMembershipManager[IO]
-    override val stateMachine      = new InMemoryStateMachine[IO]
 
-    // identity transaction
-    override def transactional[A](t: => IO[A]): IO[A] = t
-
-    // commit‐index stored in a Ref so we can observe it if we wanted
-    private val commitRef                           = Ref.unsafe[IO, Long](0L)
-    override def getCommittedLength: IO[Long]       = commitRef.get
-    override def setCommitLength(i: Long): IO[Unit] = commitRef.set(i)
-
-    // Not used in these tests
-    override def state: IO[LogState] = IO.pure(LogState(0, None, 0))
-
-    // Stubs for the methods referenced by appendEntries (not needed here)
-    def compactLogs(): IO[Unit] = IO.unit
-  }
-
-  // we need an implicit Logger[IO] for putEntries
-
-  var emptyDefer = new com.grok.raft.core.internal.Deferred[IO, Unit] {
+  var emptyDefer = new com.grok.raft.core.internal.RaftDeferred[IO, Unit] {
 
     val deffered = EffectDeferred.unsafe[IO, Unit]
 
@@ -48,7 +22,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("truncateInconsistencyLog deletes all entries > leaderPrevLogLength when the last term mismatches") {
     for {
-      log <- IO(new TestLog)
+      log <- IO(new InMemoryLog[IO])
       store = log.logStorage
       // populate indices 0→term0, 1→term1, 2→term2
       _      <- store.put(0, LogEntry(0, 0, NoOp))
@@ -74,7 +48,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("truncateInconsistencyLog is a no‐op when there is no mismatch or entries is empty") {
     for {
-      log <- IO(new TestLog)
+      log <- IO(new InMemoryLog[IO])
       store = log.logStorage
       _      <- store.put(1, LogEntry(5, 1, NoOp))
       before <- store.currentLength
@@ -89,7 +63,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("putEntries appends all new entries when leaderPrevLogLength + entries.size > currentLength") {
     for {
-      log <- IO(new TestLog)
+      log <- IO(new InMemoryLog[IO])
       store = log.logStorage
 
       // pre‐populate index 1
@@ -115,7 +89,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("putEntries does nothing when there are no new entries to append") {
     for {
-      log <- IO(new TestLog)
+      log <- IO(new InMemoryLog[IO])
       store = log.logStorage
 
       // pre‐populate two entries
@@ -133,7 +107,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("append should persist a LogEntry with the correct term and index") {
     for {
-      log <- IO(new TestLog())
+      log <- IO(new InMemoryLog[IO])
       // start with an empty log; currentLength == 0
       beforeLen <- log.logStorage.currentLength
       _ = assertEquals(beforeLen, 0L)
@@ -161,7 +135,7 @@ class LogSpec extends CatsEffectSuite {
     // build a specialized TestLog whose membershipManager has quorum=2
 
     for {
-      log <- IO(new TestLog)
+      log <- IO(new InMemoryLog[IO])
       store = log.logStorage
 
       // populate two entries

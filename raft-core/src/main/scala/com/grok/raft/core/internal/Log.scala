@@ -14,7 +14,7 @@ trait Log[F[_]]:
 
   val logStorage: LogStorage[F]
 
-  private val deferreds = TrieMap[Long, Deferred[F, Any]]()
+  private val deferreds = TrieMap[Long, RaftDeferred[F, Any]]()
 
   val membershipManager: MembershipManager[F]
 
@@ -168,14 +168,14 @@ trait Log[F[_]]:
       } yield committed.nonEmpty
     }
 
-  def append[T](term: Long, command: Command[T], deferred: Deferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
+  def append[T](term: Long, command: Command[T], deferred: RaftDeferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
     transactional {
       for {
         lastIndex <- logStorage.currentLength
         logEntry = LogEntry(term, lastIndex + 1, command)
         _ <- trace"Appending a command to the log. Term: ${term}, Index: ${lastIndex + 1}"
         _ <- logStorage.put(logEntry.index, logEntry)
-        _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
+        _ = deferreds.put(logEntry.index, deferred.asInstanceOf[RaftDeferred[F, Any]])
         _ <- trace"Entry appended. Term: ${term}, Index: ${lastIndex + 1}"
       } yield logEntry
     }
@@ -200,8 +200,9 @@ trait Log[F[_]]:
       _              <- trace"Current length: $currentLength, Committed length: $commitedLength"
       _              <- trace"Received ackLengthMap: $ackLengthMap"
       _              <- trace"Checking for quorum"
-      commited       <- (commitedLength to currentLength).toList.traverse(commitIfMatch(ackLengthMap, _))
-    } yield commited.contains(true)
+      commited       <- (commitedLength + 1 to currentLength).toList.traverse(commitIfMatch(ackLengthMap, _))
+      _              <- trace"all log commited"
+    } yield commited.contains(true) || commited.isEmpty
   }
 
   def commitIfMatch(ackedLengthMap: Map[NodeAddress, Long], lenght: Long)(using

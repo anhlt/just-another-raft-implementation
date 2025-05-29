@@ -1,0 +1,24 @@
+<configuration>
+
+  <!-- Console appender -->
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <!-- timestamp, thread, level, logger name, message -->
+      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Root logger -->
+  <root level="INFO">
+    <appender-ref ref="STDOUT" />
+  </root>
+
+  <!-- Per‐package or per‐class overrides -->
+  <!-- e.g. enable DEBUG for your own code -->
+  <logger name="com.grok.raft" level="TRACE" />
+
+  <!-- suppress noisy libraries -->
+  <logger name="org.hibernate" level="WARN" />
+  <logger name="akka" level="WARN" />
+
+</configuration>
