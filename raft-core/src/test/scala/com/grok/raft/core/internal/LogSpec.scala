@@ -147,21 +147,21 @@ class LogSpec extends CatsEffectSuite {
     for {
       log <- IO(new TestLog)
       store = log.logStorage
-      // populate indices 1→term1, 2→term2, 3→term3
+      // populate indices 0→term0, 1→term1, 2→term2
+      _      <- store.put(0, LogEntry(0, 0, NoOp))
       _      <- store.put(1, LogEntry(1, 1, NoOp))
       _      <- store.put(2, LogEntry(2, 2, NoOp))
-      _      <- store.put(3, LogEntry(3, 3, NoOp))
       before <- store.currentLength
       _ = assertEquals(before, 3L)
 
-      // incoming head term = 2, but our last term = 3 → mismatch → deleteAfter(1)
-      entries = List(LogEntry(2, 4, NoOp))
+      // incoming head term = 1, but our last term = 2 → mismatch → deleteAfter(0)
+      entries = List(LogEntry(1, 3, NoOp))
       _ <- log.truncateInconsistencyLog(entries, leaderPrevLogLength = 1L, currentLogLength = 3L)
 
       // only index 1 should remain
-      e1 <- store.get(1)
-      e2 <- store.get(2)
-      e3 <- store.get(3)
+      e1 <- store.get(0)
+      e2 <- store.get(1)
+      e3 <- store.get(2)
     } yield {
       assert(e1.isDefined, "index 1 should remain")
       assert(e2.isEmpty, "index 2 should have been deleted")
