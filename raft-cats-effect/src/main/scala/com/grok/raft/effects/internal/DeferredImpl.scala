@@ -5,7 +5,7 @@ import cats.effect.{Deferred => EFDeferred}
 
 
 
-class DeferredImpl[F[_], A](concurrentDeffered: EFDeferred[F, A]) extends Deferred[F, A]:
+class DeferredImpl[F[_], A](concurrentDeffered: EFDeferred[F, A]) extends RaftDeferred[F, A]:
 
 
   override def complete(a: A): F[Boolean] = concurrentDeffered.complete(a)

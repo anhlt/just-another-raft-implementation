@@ -7,7 +7,7 @@ import com.grok.raft.core.internal.*
 import cats.implicits.*
 import com.grok.raft.core.protocol.*
 import scala.concurrent.duration.*
-import com.grok.raft.core.error.*
+import com.grok.raft.core.internal.RaftDeferred
 
 trait Raft[F[_]] {
 
@@ -21,6 +21,8 @@ trait Raft[F[_]] {
 
   val log: Log[F]
 
+  val rpcClient: RpcClient[F]
+
   def setRunning(running: Boolean): F[Unit]
 
   def getRunning: F[Boolean]
@@ -29,14 +31,23 @@ trait Raft[F[_]] {
 
   def setCurrentNode(node: Node): F[Unit]
 
-  def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit] = ???
+  def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit]
 
   def electionTimeoutElapsed(using Monad[F]): F[Boolean]
 
+  // Running a background task
+  def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit]
+
+  // Function to schedule a task with a delay
+  // repeatedly runs the task after the specified delay
+  // until getRunning returns false
+  def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit]
+
+  // Function to create a deferred computation
+  def deferred[A]: F[RaftDeferred[F, A]]
+
   // Function to randomly delay the election
   def delayElection()(using Monad[F]): F[Unit]
-
-  def rpcClient: RpcClient[F]
 
   def start()(using MonadThrow[F], Logger[F]): F[Unit] = {
     for {
@@ -58,7 +69,9 @@ trait Raft[F[_]] {
       logState <- log.state
       cluster  <- membershipManager.getClusterConfiguration
       actions  <- modifyState(node => node.onTimer(logState, cluster))
+      _        <- trace"Running election with actions: ${actions}"
       _        <- runActions(actions)
+      _        <- trace"Election finished"
     } yield ()
 
   def modifyState[B](f: Node => (Node, B))(using MonadThrow[F], Logger[F]): F[B] =
@@ -77,6 +90,7 @@ trait Raft[F[_]] {
         for {
           _        <- trace"Sending a vote request to ${reqForVote}"
           response <- rpcClient.send(reqForVote.peerId, reqForVote.request)
+          _        <- trace"Vote response received: ${response}"
           _        <- onVoteResponse(response)
         } yield ()
       case replicateLog: ReplicateLog =>
@@ -90,36 +104,40 @@ trait Raft[F[_]] {
       case CommitLogs(ackLengthMap) =>
         for {
           committed <- log.commitLogs(ackLengthMap)
-          _         <- if (committed) storeState() else Monad[F].unit
+          _         <- if (committed) storeState else Monad[F].unit
         } yield ()
-      case announceLeader: AnnounceLeader => ???
-      case ResetLeaderAnnouncer           => ???
-      case StoreState                     => ???
 
+      case AnnounceLeader(leaderId, true) =>
+        leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
+
+      case AnnounceLeader(leaderId, false) =>
+        trace"Announcing a new leader without resetting " *> leaderAnnouncer.announce(leaderId)
+
+      case ResetLeaderAnnouncer =>
+        leaderAnnouncer.reset()
+      case StoreState => storeState
     }
   }
 
   def onLogRequest(msg: LogRequest)(using MonadThrow[F], Logger[F]): F[LogRequestResponse] = {
     for {
-      _        <- trace"A AppendEntriesRequest received from ${msg.leaderId} with term ${msg.term}"
-      logState <- log.state
-      config   <- membershipManager.getClusterConfiguration
-      logPrevSent <- log.get(msg.prevSentLogLength - 1)
-      (response, actions)<- modifyState(_.onLogRequest(msg, logState,logPrevSent,  config))
-      _ <- updateLastHeartbeat
-      _        <- runActions(actions)
-              appended <-
-          if (response.success) {
-            for {
-              appended <- log.appendEntries(msg.entries, msg.prevSentLogLength, msg.leaderCommit)
-            } yield appended
-          } else
-            Monad[F].pure(false)
+      _                   <- trace"A AppendEntriesRequest received from ${msg.leaderId} with term ${msg.term}"
+      logState            <- log.state
+      config              <- membershipManager.getClusterConfiguration
+      logPrevSent         <- log.get(msg.prevSentLogLength - 1)
+      (response, actions) <- modifyState(_.onLogRequest(msg, logState, logPrevSent, config))
+      _                   <- updateLastHeartbeat
+      _                   <- runActions(actions)
+      appended <-
+        if (response.success) {
+          for {
+            appended <- log.appendEntries(msg.entries, msg.prevSentLogLength, msg.leaderCommit)
+          } yield appended
+        } else
+          Monad[F].pure(false)
 
     } yield response
   }
-
-
 
   def onLogRequestResponse(msg: LogRequestResponse)(using MonadThrow[F], Logger[F]): F[Unit] =
     for {
@@ -150,6 +168,7 @@ trait Raft[F[_]] {
       logState <- log.state
       config   <- membershipManager.getClusterConfiguration
       actions  <- modifyState((node: Node) => node.onVoteResponse(msg, logState, config))
+      _        <- trace"Got new actions: ${actions}"
       _        <- runActions(actions)
     } yield ()
 
@@ -157,6 +176,7 @@ trait Raft[F[_]] {
     background {
       schedule(config.heartbeatTimeoutMillis.milliseconds) {
         for {
+          _     <- trace"Scheduling election"
           alive <- electionTimeoutElapsed
           _     <- if (alive) Monad[F].unit else runElection()
         } yield ()
@@ -168,6 +188,7 @@ trait Raft[F[_]] {
     background {
       schedule(config.heartbeatIntervalMillis.milliseconds) {
         for {
+          _      <- trace"Scheduling Replication"
           node   <- currentNode
           config <- membershipManager.getClusterConfiguration
           actions = if (node.isInstanceOf[Leader]) node.onReplicateLog(config) else List.empty
@@ -176,13 +197,6 @@ trait Raft[F[_]] {
       }
     }
   }
-  
-  def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit]
-
-  def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit]
-
-  // Function to create a deferred computation
-  def deferred[A]: F[Deferred[F, A]] = ???
 
   def onCommand[T](c: Command[T])(using MonadThrow[F], Logger[F]): F[T] = c match {
     case cmd: ReadCommand[T] =>
@@ -192,8 +206,8 @@ trait Raft[F[_]] {
           case leader: Leader => log.applyReadCommand(cmd)
           case _ =>
             for {
-              leaderNode <- leaderAnnouncer.listen()
-              rs         <- rpcClient.send(leaderNode.address, cmd)
+              leaderAddress <- leaderAnnouncer.listen()
+              rs            <- rpcClient.send(leaderAddress, cmd)
             } yield rs
       } yield (result)
 
@@ -231,7 +245,7 @@ trait Raft[F[_]] {
     * @return
     *   A wrapped effect that yields a list of actions to be performed after the command is processed.
     */
-  private def onWriteCommand[T](node: Node, cmd: WriteCommand[T], deferred: Deferred[F, T])(using
+  private def onWriteCommand[T](node: Node, cmd: WriteCommand[T], deferred: RaftDeferred[F, T])(using
       MonadThrow[F],
       Logger[F]
   ): F[List[Action]] = {
@@ -245,16 +259,15 @@ trait Raft[F[_]] {
       }
       case _ => {
         for {
-          _        <- trace"Follower received write command"
-          leader   <- leaderAnnouncer.listen()
-          _        <- trace"The current leader is ${leader}."
-          response <- rpcClient.send(leader.address, cmd)
-          _        <- trace"Response for the write command received from the leader"
-          actions  <- deferred.complete(response)
+          _             <- trace"Follower received write command"
+          leaderAddress <- leaderAnnouncer.listen()
+          _             <- trace"The current leader is ${leaderAddress}."
+          response      <- rpcClient.send(leaderAddress, cmd)
+          _             <- trace"Response for the write command received from the leader"
+          actions       <- deferred.complete(response)
         } yield List.empty
       }
   }
 
-
-  def storeState()(using Monad[F], Logger[F]): F[Unit] = ???
+  def storeState(using Monad[F], Logger[F]): F[Unit]
 }

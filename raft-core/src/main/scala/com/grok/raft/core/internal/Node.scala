@@ -289,7 +289,7 @@ case class Follower(
       clusterConfiguration: ClusterConfiguration
   ): (Node, LogRequestResponse) = ???
 
-  def leader(): Option[NodeAddress] = ???
+  def leader(): Option[NodeAddress] = currentLeader
 
   def toPersistedState: PersistedState = ???
 
@@ -400,7 +400,8 @@ case class Candidate(
         .filter(_ != address)
         .map(node => (node, 0L))
         .toMap
-      val actions = clusterConfiguration.members.map(n => ReplicateLog(n, currentTerm, logLength))
+      val actions = clusterConfiguration.members.filter(_ != address).map(n => ReplicateLog(n, currentTerm, logLength))
+
 
       (
         Leader(address, currentTerm, sentLengthMap, ackedLengthMap),
@@ -648,7 +649,7 @@ case class Leader(
       voteResponse: VoteResponse,
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, List[Action]) = ???
+  ): (Node, List[Action]) = (this, List.empty[Action])
 
   /** Handles incoming AppendEntries (log replication) RPCs from another leader. If a higher term is detected, leader
     * steps down to follower to maintain Election Safety. Otherwise, replies with success or failure according to log

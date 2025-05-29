@@ -35,7 +35,7 @@ trait LeaderAnnouncer[F[_]]:
     * @return
     *   An effect that completes once all listeners have been notified.
     */
-  def announce(leader: Node): F[Unit]
+  def announce(leader: NodeAddress): F[Unit]
 
   /** Reset the announcer, preparing to listen for a new leader.
     *
@@ -56,6 +56,6 @@ trait LeaderAnnouncer[F[_]]:
     * @return
     *   An effect that completes with the latest known leader.
     */
-  def listen(): F[Node]
+  def listen(): F[NodeAddress]
 
 

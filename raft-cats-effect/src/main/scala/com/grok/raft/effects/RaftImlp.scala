@@ -21,6 +21,11 @@ class RaftImlp[F[_]: {Sync, Temporal}](
     lastHeartbeatRef: Ref[F, Long],
 ) extends Raft[F]:
 
+
+  override def deferred[A]: F[RaftDeferred[F, A]] = ???
+
+  override def storeState(using Monad[F], Logger[F]): F[Unit] = ???
+
   override def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit] = ???
 
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = 
