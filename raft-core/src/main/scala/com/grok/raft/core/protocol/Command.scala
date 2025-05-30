@@ -1,4 +1,4 @@
-package com.grok.raft.core
+package com.grok.raft.core.protocol
 
 sealed trait Command[T]
 

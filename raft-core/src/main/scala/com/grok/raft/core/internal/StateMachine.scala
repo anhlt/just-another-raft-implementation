@@ -1,6 +1,6 @@
 package com.grok.raft.core.internal
 
-import com.grok.raft.core._
+import com.grok.raft.core.protocol.*
 
 
 /**

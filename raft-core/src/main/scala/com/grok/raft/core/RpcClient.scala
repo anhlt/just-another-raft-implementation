@@ -1,7 +1,8 @@
-package com.grok.raft.core.internal
+package com.grok.raft.core
 
-import com.grok.raft.core.protocol._
-import com.grok.raft.core._
+import com.grok.raft.core.protocol.*
+import com.grok.raft.core.internal.*
+
 
 trait RpcClient[F[_]] {
 

@@ -1,7 +1,8 @@
 package com.grok.raft.core.internal
 
-import com.grok.raft.core.storage._
-import com.grok.raft.core.protocol._
+import com.grok.raft.core.storage.*
+import com.grok.raft.core.protocol.*
+import com.grok.raft.core.*
 
 /** The Node state represents the State Machine in Raft Protocol The possible states are:
   *   - Follower
@@ -94,6 +95,11 @@ sealed trait Node {
       msg: LogRequestResponse
   ): (Node, List[Action])
 
+  /** This method is called when a log entry is replicated to the followers
+    * No ops on Candidate and Follower nodes
+    * @param configCluster
+    * @return
+    */
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action]
 
   def onSnapshotInstalled(

@@ -5,6 +5,7 @@ import cats.implicits.*
 import com.grok.raft.core.*
 import com.grok.raft.core.error.*
 import com.grok.raft.core.internal.storage.*
+import com.grok.raft.core.protocol.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.syntax.*
 

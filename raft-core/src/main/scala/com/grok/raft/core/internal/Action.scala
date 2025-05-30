@@ -2,6 +2,13 @@ package com.grok.raft.core.protocol
 
 import com.grok.raft.core.internal.NodeAddress
 
+/**
+ * Action is outcome of NodeState transitions.
+ * It represents the actions that can be taken by the Raft node
+ * in response to state changes, such as sending requests, committing logs,
+ * or announcing leadership. Each action corresponds to a specific
+ * operation that the node can perform in the Raft consensus algorithm.
+*/
 trait Action
 
 case class RequestForVote(peerId: NodeAddress, request: VoteRequest) extends Action
@@ -27,6 +34,17 @@ case class ReplicateLog(peerId: NodeAddress, term: Long, prefixLength: Long) ext
 
 
 case class CommitLogs(ackLengthMap: Map[NodeAddress, Long])                        extends Action
+
+
+/**
+ * Action to announce a leader to the cluster.
+ *
+ * This action is used by the leader node to notify other nodes of its leadership status.
+ * It includes the leader's ID and an optional flag to reset any previous announcements.
+ *
+ * @param leaderId The identifier of the leader node.
+ * @param resetPrevious If true, resets any previous leader announcements.
+ */
 case class AnnounceLeader(leaderId: NodeAddress, resetPrevious: Boolean = false) extends Action
 
 /**
