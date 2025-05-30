@@ -227,12 +227,23 @@ case class Follower(
       val nextState =
         this.copy(currentTerm = leaderTerm, currentLeader = Some(leaderId))
 
+
+      // When stepping down to follower due to a higher term leader (leaderId),
+      // we must inform the system about the new leader and reset any previous leadership state.
+      // This prevents the system from holding stale leadership information which could cause conflicts or stale reads.
+      // Setting `resetPrevious = true` signals that any cached or remembered leader info should be cleared,
+      // ensuring listeners or components observing leadership see the fresh and correct leader.
+      // Also, persisting state via StoreState guarantees durability of the updated term and leadership changes,
+      // which is critical before announcing a new leader to prevent inconsistencies after crashes.
+      // This is aligned with Raft Paper §5.2 (Election Safety) ensuring at most one leader per term,
+      // and distributed systems principles around safe state propagation during role changes.
       val announceLeaderAction =
-        if (currentLeader.contains(leaderId))
+        if (!currentLeader.contains(leaderId))
+          // announce the new leader if it is different from the current leader
           List(
             AnnounceLeader(
               leaderId = leaderId,
-              resetPrevious = currentLeader.isEmpty
+              resetPrevious = !currentLeader.isEmpty // reset previous leader info if it exists
             )
           )
         else List.empty[Action]
@@ -356,7 +367,7 @@ case class Candidate(
     (logOk && termOk) match
       case true =>
         (
-          Follower(address, candidateTerm, Some(proposedLeaderAddress)),
+          Follower(address, candidateTerm, Some(proposedLeaderAddress), votedFor=Some(proposedLeaderAddress)),
           (
             VoteResponse(address, candidateTerm, logOk && termOk),
             List(StoreState)

@@ -15,6 +15,19 @@ import com.grok.raft.core.protocol.*
 
 object NoOp extends ReadCommand[Unit]
 
+
+object TestData {
+
+  val addr1 = NodeAddress("n1", 9090)
+  val addr2 = NodeAddress("n2", 9090)
+  val addr3 = NodeAddress("n3", 9090)
+
+  val leader = Leader(currentTerm = 1L, address = addr1)
+  val follower1 = Follower(currentTerm = 1L, address = addr2)
+  val follower2 = Follower(currentTerm = 1L, address = addr3)
+
+}
+
 // 1) An in‐memory LogStorage
 class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
 
@@ -51,16 +64,16 @@ class DummyMembershipManager[F[_]: Sync] extends MembershipManager[F]:
   val configurationRef: Ref[F, ClusterConfiguration] =
     Ref.unsafe[F, ClusterConfiguration](
       ClusterConfiguration(
-        currentNode = Leader(currentTerm = 1L, address = NodeAddress("n1", 9090)),
-        members = List(NodeAddress("n1", 9090), NodeAddress("n2", 9090), NodeAddress("n3", 9090))
+        currentNode = TestData.leader ,
+        members = List(TestData.addr1, TestData.addr2, TestData.addr3)
       )
     )
 
   override def members: F[Set[Node]] = Monad[F].pure(
     Set(
-      Leader(currentTerm = 1L, address = NodeAddress("n1", 9090)),
-      Follower(currentTerm = 1L, address = NodeAddress("n2", 9090)),
-      Follower(currentTerm = 1L, address = NodeAddress("n3", 9090))
+      TestData.leader,
+      TestData.follower1,
+      TestData.follower2
     )
   )
 
@@ -108,7 +121,7 @@ class StubRpcClient[F[_]: Sync](voteMap: Map[NodeAddress, Boolean]) extends RpcC
 
   override def send(peer: NodeAddress, req: VoteRequest): F[VoteResponse] =
     Sync[F].delay {
-      VoteResponse(peer, req.term, voteMap.getOrElse(peer, false))
+      VoteResponse(peer, req.candidateTerm, voteMap.getOrElse(peer, false))
     }
 
   override def send(peer: NodeAddress, req: LogRequest): F[LogRequestResponse] =
