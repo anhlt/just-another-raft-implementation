@@ -1,4 +1,5 @@
-package com.grok.raft.core.internal
+package com.grok.raft.core
+import com.grok.raft.core.internal.*
 
 trait MembershipManager[F[_]] {
   def members: F[Set[Node]]

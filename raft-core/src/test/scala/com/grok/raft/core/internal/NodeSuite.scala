@@ -3,8 +3,9 @@ package com.grok.raft.core.internal
 
 import munit.FunSuite
 
-import com.grok.raft.core.internal._
-import com.grok.raft.core.protocol._
+import com.grok.raft.core.internal.*
+import com.grok.raft.core.protocol.*
+import com.grok.raft.core.*
 
 class NodeSuite extends FunSuite {
 
