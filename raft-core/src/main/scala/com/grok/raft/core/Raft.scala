@@ -151,7 +151,7 @@ trait Raft[F[_]] {
 
   def onVoteRequest(msg: VoteRequest)(using MonadThrow[F], Logger[F]): F[VoteResponse] = {
     for {
-      _                   <- trace"A Vote request received from ${msg.nodeAddress}, Term: ${msg.lastLogTerm}, ${msg}"
+      _                   <- trace"A Vote request received from ${msg.proposedLeaderAddress}, Term: ${msg.candidateTerm}, ${msg}"
       logState            <- log.state
       config              <- membershipManager.getClusterConfiguration
       (response, actions) <- modifyState(_.onVoteRequest(msg, logState, config))
