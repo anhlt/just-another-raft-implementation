@@ -8,6 +8,7 @@ import cats.implicits.*
 import com.grok.raft.core.protocol.*
 import scala.concurrent.duration.*
 import com.grok.raft.core.internal.RaftDeferred
+import com.grok.raft.core.storage.*
 
 trait Raft[F[_]] {
 
@@ -20,6 +21,8 @@ trait Raft[F[_]] {
   val logPropagator: LogPropagator[F]
 
   val log: Log[F]
+
+  val stateStorage: StateStorage[F]
 
   val rpcClient: RpcClient[F]
 
@@ -74,7 +77,7 @@ trait Raft[F[_]] {
       _        <- trace"Election finished"
     } yield ()
 
-  def modifyState[B](f: Node => (Node, B))(using MonadThrow[F], Logger[F]): F[B] =
+  def modifyState[B](f: Node => (Node, B))(using MonadThrow[F]): F[B] =
     for {
       currentState <- currentNode
       (newState, actions) = f(currentState)
@@ -269,5 +272,11 @@ trait Raft[F[_]] {
       }
   }
 
-  def storeState(using Monad[F], Logger[F]): F[Unit]
+  def storeState(using Monad[F], Logger[F]): F[Unit] =
+    for {
+      _        <- trace"Storing the new state in the storage"
+      logState <- log.state
+      node     <- currentNode
+      _        <- stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.appliedLogLength))
+    } yield ()
 }
