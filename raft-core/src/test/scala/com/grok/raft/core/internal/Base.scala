@@ -12,6 +12,8 @@ import com.grok.raft.core.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import com.grok.raft.core.protocol.*
+import com.grok.raft.core.storage.PersistedState
+import com.grok.raft.core.storage.StateStorage
 
 object NoOp extends ReadCommand[Unit]
 
@@ -156,4 +158,14 @@ class InMemoryLog[F[_]: Sync] extends Log[F] {
 
     // Stubs for the methods referenced by appendEntries (not needed here)
     def compactLogs(): F[Unit] = Sync[F].unit
+}
+
+class InMemoryStateStorage [F[_]: Sync] extends StateStorage[F] {
+
+  private val ref = Ref.unsafe[F, PersistedState](PersistedState(0L, None, 0L))
+
+  def persistState(state: PersistedState): F[Unit] = ref.set(state)
+
+  def retrieveState(): F[Option[PersistedState]] = 
+    ref.get.map(Some(_))
 }

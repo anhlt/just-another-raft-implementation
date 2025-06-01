@@ -308,7 +308,7 @@ case class Follower(
 
   def leader(): Option[NodeAddress] = currentLeader
 
-  def toPersistedState: PersistedState = ???
+  def toPersistedState: PersistedState = PersistedState(term = currentTerm , votedFor = votedFor)
 
 }
 
@@ -532,7 +532,7 @@ case class Candidate(
 
   def leader(): Option[NodeAddress] = None
 
-  def toPersistedState: PersistedState = ???
+  def toPersistedState: PersistedState = PersistedState(term = currentTerm , votedFor = votedFor)
 
 }
 
@@ -815,6 +815,6 @@ case class Leader(
 
   def leader(): Option[NodeAddress] = Some(address)
 
-  def toPersistedState: PersistedState = ???
+  def toPersistedState: PersistedState = PersistedState(term = currentTerm , votedFor = Some(address))
 
 }

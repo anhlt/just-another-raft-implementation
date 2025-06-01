@@ -7,6 +7,7 @@ import org.typelevel.log4cats.Logger
 import com.grok.raft.core.internal.*
 import munit.CatsEffectSuite
 import scala.concurrent.duration.*
+import com.grok.raft.core.storage.*
 
 class TestRaft[F[_]: Async](
     override val config: ClusterConfiguration,
@@ -14,6 +15,7 @@ class TestRaft[F[_]: Async](
     override val membershipManager: MembershipManager[F],
     override val logPropagator: LogPropagator[F],
     override val log: Log[F],
+    override val stateStorage: StateStorage[F],
     override val rpcClient: RpcClient[F]
 ) extends Raft[F] {
 
@@ -49,7 +51,6 @@ class TestRaft[F[_]: Async](
   def scheduleElection()(using Monad[F], Logger[F]): F[Unit]    = Monad[F].unit
   def scheduleReplication()(using Monad[F], Logger[F]): F[Unit] = Monad[F].unit
   def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit]   = Monad[F].unit
-  def storeState(using Monad[F], Logger[F]): F[Unit]            = Monad[F].unit
 }
 
 class RaftElectionSpec extends CatsEffectSuite {
@@ -86,6 +87,7 @@ class RaftElectionSpec extends CatsEffectSuite {
         membershipManager = new DummyMembershipManager[IO],
         logPropagator = new DummyLogPropagator[IO],
         log = new InMemoryLog[IO],
+        stateStorage = new InMemoryStateStorage[IO],
         rpcClient = rpcClient
       )
 
@@ -101,7 +103,7 @@ class RaftElectionSpec extends CatsEffectSuite {
         s"Expected a Leader but got ${currentNode}"
       )
       // optionally inspect term / address
-      val Leader(addr, term, _, _, _) = currentNode
+      val Leader(addr, term, _, _, _) = currentNode.asInstanceOf[Leader]
       assertEquals(addr, n1, "n1 should have self-elected as leader on term 1")
       assert(term > 0, "Term should have been bumped by the election")
     }

@@ -15,7 +15,7 @@
 
   <!-- Per‐package or per‐class overrides -->
   <!-- e.g. enable DEBUG for your own code -->
-  <logger name="com.grok.raft" level="TRACE" />
+  <logger name="com.grok.raft" level="DEBUG" />
 
   <!-- suppress noisy libraries -->
   <logger name="org.hibernate" level="WARN" />
