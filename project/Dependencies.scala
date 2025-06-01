@@ -6,7 +6,7 @@ object Dependencies {
   val catsCore         = Def.setting("org.typelevel" %% "cats-core" % "2.13.0")
   val log4CatsCore     = Def.setting("org.typelevel" %% "log4cats-slf4j" % "2.7.1")
   val log4CatsLog4j    = Def.setting("org.typelevel" %% "log4cats-slf4j" % "2.7.1" % Test)
-  val logback          = Def.setting("ch.qos.logback" % "logback-classic" % "1.4.14" % Test)
+  val logback          = Def.setting("ch.qos.logback" % "logback-classic" % "1.5.18" % Test)
   val catsEffect       = Def.setting("org.typelevel" %% "cats-effect" % "3.6.1")
   val catsEffectKernel = Def.setting("org.typelevel" %% "cats-effect-kernel" % "3.6.1")
   val catsEffectStd    = Def.setting("org.typelevel" %% "cats-effect-std" % "3.6.1")
