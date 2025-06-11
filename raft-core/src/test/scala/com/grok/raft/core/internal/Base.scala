@@ -166,6 +166,6 @@ class InMemoryStateStorage [F[_]: Sync] extends StateStorage[F] {
 
   def persistState(state: PersistedState): F[Unit] = ref.set(state)
 
-  def retrieveState(): F[Option[PersistedState]] = 
+  def retrieveState: F[Option[PersistedState]] = 
     ref.get.map(Some(_))
 }
