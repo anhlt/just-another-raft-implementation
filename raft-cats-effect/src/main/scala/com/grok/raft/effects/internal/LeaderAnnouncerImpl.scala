@@ -7,6 +7,7 @@ import cats.implicits._
 import cats.effect.kernel._
 import cats._
 import cats.effect._
+import com.grok.raft.core.internal.NodeAddress
 
 /**
  * Implementation of the LeaderAnnouncer trait using Cats Effect concurrency primitives.
@@ -25,7 +26,7 @@ import cats.effect._
  *
  * @tparam F effect type with concurrent capabilities
  */
-class LeaderAnnouncerImpl[F[_]: Concurrent](ref: Ref[F, Deferred[F, Node]]) extends LeaderAnnouncer[F]:
+class LeaderAnnouncerImpl[F[_]: Concurrent](ref: Ref[F, Deferred[F, NodeAddress]]) extends LeaderAnnouncer[F]:
 
   /**
    * Listen for the next leader announcement.
@@ -34,7 +35,8 @@ class LeaderAnnouncerImpl[F[_]: Concurrent](ref: Ref[F, Deferred[F, Node]]) exte
    *
    * @return an effect producing the current or next leader
    */
-  override def listen(): F[Node] = 
+
+  override def listen(): F[NodeAddress] = 
     for {
       currentDeferred <- ref.get                  // Retrieve current Deferred
       leader <- currentDeferred.get               // Suspend until Deferred is completed
@@ -48,7 +50,7 @@ class LeaderAnnouncerImpl[F[_]: Concurrent](ref: Ref[F, Deferred[F, Node]]) exte
    * @param leader the newly elected leader node
    * @return effect signaling completion of announcement
    */
-  override def announce(leader: Node): F[Unit] = 
+  override def announce(leader: NodeAddress): F[Unit] = 
     for {
       currentDeferred <- ref.get                   // Retrieve current Deferred
       _ <- currentDeferred.complete(leader)       // Complete Deferred to announce leader
@@ -66,6 +68,6 @@ class LeaderAnnouncerImpl[F[_]: Concurrent](ref: Ref[F, Deferred[F, Node]]) exte
    */
   override def reset(): F[Unit] = 
     for {
-      newDeferred <- Deferred[F, Node]             // Create new empty Deferred
+      newDeferred <- Deferred[F, NodeAddress]             // Create new empty Deferred
       _ <- ref.set(newDeferred)                     // Replace current Deferred atomically
     } yield ()

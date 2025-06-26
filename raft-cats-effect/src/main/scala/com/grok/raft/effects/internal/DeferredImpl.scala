@@ -1,6 +1,7 @@
 package com.grok.raft.effects.internal
 
 import cats.effect.{Deferred => EFDeferred}
+import com.grok.raft.core.internal.RaftDeferred
 
 
 

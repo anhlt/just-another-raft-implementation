@@ -3,11 +3,12 @@ package com.grok.raft.effects
 import com.grok.raft.core.Raft
 import cats._
 import cats.effect._
-import com.grok.raft.core.internal._
 import cats.implicits._
 import scala.concurrent.duration._
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.syntax.*
+import com.grok.raft.core.*
+import com.grok.raft.core.internal.*
 
 class RaftImlp[F[_]: {Sync, Temporal}](
     val config: ClusterConfiguration,
