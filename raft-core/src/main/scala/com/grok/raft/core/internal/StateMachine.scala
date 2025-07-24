@@ -25,8 +25,8 @@ import com.grok.raft.core.protocol.*
  * 
  * @tparam F The effect type for state machine operations
  */
-trait StateMachine[F[_]] :
+trait StateMachine[F[_], T]:
   def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]]
   def applyRead: PartialFunction[ReadCommand[?], F[Any]]
   def appliedIndex: F[Long]
-
+  def restoreSnapshot[T](lastIndex: Long, data: T): F[Unit]

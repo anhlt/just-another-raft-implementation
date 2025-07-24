@@ -2,18 +2,22 @@ package com.grok.raft.core.internal
 
 import cats.*
 import cats.implicits.*
+import cats.syntax.all.*
 import com.grok.raft.core.*
 import com.grok.raft.core.error.*
 import com.grok.raft.core.internal.storage.*
 import com.grok.raft.core.protocol.*
+import com.grok.raft.core.storage.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.syntax.*
 
 import scala.collection.concurrent.TrieMap
 
-trait Log[F[_]]:
+trait Log[F[_], T]:
 
   val logStorage: LogStorage[F]
+
+  val snapshotStorage: SnapshotStorage[F, T]
 
   private val deferreds = TrieMap[Long, RaftDeferred[F, Any]]()
 
@@ -21,7 +25,25 @@ trait Log[F[_]]:
 
   def transactional[A](t: => F[A]): F[A]
 
-  val stateMachine: StateMachine[F]
+  val stateMachine: StateMachine[F, T]
+
+
+  def initialize(using
+      MonadThrow[F],
+      Logger[F]
+  ): F[Unit] =
+    for {
+      snapshot <- snapshotStorage.retrieveSnapshot
+      _ <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
+      commitLength <- getCommittedLength
+      stateMachineIndex <- stateMachine.appliedIndex
+      _ <- {
+        if (stateMachineIndex > commitLength - 1) setCommitLength(stateMachineIndex + 1)
+        else (stateMachineIndex to commitLength).toList.traverse(commitLog).void
+      } 
+    } yield ()
+
+
 
   /** Methods to access and modify the commit index. The commit index represents the highest log entry known to be
     * committed in the Raft consensus.
@@ -258,3 +280,12 @@ trait Log[F[_]]:
     stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
 
   def compactLogs(): F[Unit] 
+
+  def restoreSnapshot[T](snapshot: Snapshot[T])(using
+      Monad[F],
+      Logger[F]
+  ): F[Unit] = 
+    for {
+      _ <- membershipManager.setClusterConfiguration(snapshot.config)
+      _ <- stateMachine.restoreSnapshot(snapshot.lastIndex, snapshot.data)
+    } yield ()
