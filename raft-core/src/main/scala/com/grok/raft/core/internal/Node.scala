@@ -65,8 +65,8 @@ sealed trait Node {
     *
     * 2. Log Consistency Check:
     *   - Verify the consistency of the local log with the leader's log.
-    *   - Compare the follower’s log length with the prevSentLogLength provided in the request.
-    *   - If the follower's log is sufficiently long, ensure that the log entry at the prevSentLogLength index matches
+    *   - Compare the follower's log length with the prevSentLogIndex provided in the request.
+    *   - If the follower's log is sufficiently long, ensure that the log entry at the prevSentLogIndex index matches
     *     the prevLogTerm in the request.
     *   - Reject the request if any inconsistencies, such as gaps or term mismatches, are detected.
     *
@@ -75,7 +75,7 @@ sealed trait Node {
     * @param logState
     *   the current state of the local log.
     * @param logEntryAtPrevSent
-    *   the log entry at the specified prevSentLogLength.
+    *   the log entry at the specified prevSentLogIndex.
     * @param clusterConfiguration
     *   the current cluster configuration details.
     *
@@ -151,13 +151,13 @@ case class Follower(
     val VoteRequest(
       proposedLeaderAddress,
       candidateTerm,
-      candidateLogLength,
+      candidateLogIndex,
       candidateLastLogTerm
     ) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= (logState.logLength - 1))
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -210,7 +210,7 @@ case class Follower(
     val LogRequest(
       leaderId,
       leaderTerm,
-      prevSentLogLength,
+      prevSentLogIndex,
       prevLastLogTerm,
       _,
       _
@@ -257,10 +257,10 @@ case class Follower(
       val actions = StoreState :: announceLeaderAction
 
       if (
-        logState.logLength >= prevSentLogLength &&
+        logState.logLength > prevSentLogIndex &&
         logEntryAtPrevSent
           .map(_.term == prevLastLogTerm)
-          .getOrElse(prevSentLogLength == 0)
+          .getOrElse(prevSentLogIndex == -1)
       ) {
         (
           nextState,
@@ -268,7 +268,7 @@ case class Follower(
             LogRequestResponse(
               address,
               leaderTerm,
-              prevSentLogLength + logRequest.entries.length,
+              prevSentLogIndex + 1 + logRequest.entries.length,
               true
             ),
             actions
@@ -328,7 +328,7 @@ case class Candidate(
     val newLastLogTerm =
       logState.lastLogTerm.getOrElse(0L) // Potential bug. Need to check later
     val voteRequest =
-      VoteRequest(address, newTerm, logState.logLength, newLastLogTerm)
+      VoteRequest(address, newTerm, logState.logLength - 1, newLastLogTerm)
 
     val actions = clusterConfiguration.members
       .filterNot(_ == address)
@@ -358,13 +358,13 @@ case class Candidate(
     val VoteRequest(
       proposedLeaderAddress,
       candidateTerm,
-      candidateLogLength,
+      candidateLogIndex,
       candidateLastLogTerm
     ) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= (logState.logLength - 1))
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -405,23 +405,23 @@ case class Candidate(
 
     val newVoteReceived =
       if (voteGranted) voteReceived + responseAddress else voteReceived
-    val logLength = logState.logLength
+    val logIndex = logState.logLength - 1
 
     if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
       // construct the leader state
-      val sentLengthMap = clusterConfiguration.members
+      val sentIndexMap = clusterConfiguration.members
         .filter(_ != address)
-        .map(node => (node, logLength)) // we think we lenght of log
+        .map(node => (node, logIndex)) // use last index (0-based)
         .toMap
-      val ackedLengthMap = clusterConfiguration.members
+      val ackedIndexMap = clusterConfiguration.members
         .filter(_ != address)
-        .map(node => (node, 0L))
+        .map(node => (node, -1L)) // -1 means no entries acknowledged yet
         .toMap
-      val actions = clusterConfiguration.members.filter(_ != address).map(n => ReplicateLog(n, currentTerm, logLength))
+      val actions = clusterConfiguration.members.filter(_ != address).map(n => ReplicateLog(n, currentTerm, logIndex))
 
 
       (
-        Leader(address, currentTerm, sentLengthMap, ackedLengthMap),
+        Leader(address, currentTerm, sentIndexMap, ackedIndexMap),
         StoreState :: AnnounceLeader(address) :: actions
       )
 
@@ -449,7 +449,7 @@ case class Candidate(
     val LogRequest(
       leaderId,
       leaderTerm,
-      prevSentLogLength,
+      prevSentLogIndex,
       prevLastLogTerm,
       _,
       _
@@ -480,10 +480,10 @@ case class Candidate(
       // check if current log on the candidate is long enough
       // and if it long enough, check if the term of at logEntry At PrevLogIndex is the same as the prevLogTerm
       if (
-        logState.logLength >= prevSentLogLength &&
+        logState.logLength > prevSentLogIndex &&
         logEntryAtPrevSent
           .map(_.term == prevLastLogTerm)
-          .getOrElse(prevSentLogLength == 0)
+          .getOrElse(prevSentLogIndex == -1)
       ) {
         (
           nextState,
@@ -491,7 +491,7 @@ case class Candidate(
             LogRequestResponse(
               address,
               leaderTerm,
-              prevSentLogLength + logRequest.entries.length,
+              prevSentLogIndex + 1 + logRequest.entries.length,
               true
             ),
             actions
@@ -546,8 +546,8 @@ case class Candidate(
   *   - Responding to term changes and stepping down if a higher-term leader is detected.
   *
   * This implementation tracks two key maps:
-  *   - `sentLengthMap`: The highest log index sent to each follower (equivalent to `nextIndex` in the Raft paper),
-  *   - `ackLengthMap`: The highest log index acknowledged (matched) by each follower (equivalent to `matchIndex`).
+  *   - `sentIndexMap`: The highest log index sent to each follower (equivalent to `nextIndex` in the Raft paper),
+  *   - `ackIndexMap`: The highest log index acknowledged (matched) by each follower (equivalent to `matchIndex`).
   *
   * These mappings are used to determine when log entries are safely replicated on a majority and can be considered
   * committed (Raft Paper §5.3, §5.4).
@@ -564,9 +564,9 @@ case class Candidate(
   *   The unique network address of the leader node.
   * @param currentTerm
   *   The term number the leader is operating in.
-  * @param sentLengthMap
+  * @param sentIndexMap
   *   Tracks the highest log entry index sent to each follower (equivalent to `nextIndex`, Raft Paper Figure 2).
-  * @param ackLengthMap
+  * @param ackIndexMap
   *   Tracks the highest log entry index acknowledged by each follower (equivalent to `matchIndex`).
   * @param currentLeader
   *   (Optionally) the current leader address (usually self).
@@ -583,8 +583,8 @@ case class Candidate(
 case class Leader(
     val address: NodeAddress,
     val currentTerm: Long,
-    val sentLengthMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
-    val ackLengthMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
+    val sentIndexMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
+    val ackIndexMap: Map[NodeAddress, Long] = Map.empty[NodeAddress, Long],
     val currentLeader: Option[NodeAddress] = None
 ) extends Node {
 
@@ -627,14 +627,14 @@ case class Leader(
       clusterConfiguration: ClusterConfiguration
   ): (Node, (VoteResponse, List[Action])) = {
 
-    val VoteRequest(candidateAddress, candidateTerm, candidateLogLength, candidateLastLogTerm) = voteRequest
+    val VoteRequest(candidateAddress, candidateTerm, candidateLogIndex, candidateLastLogTerm) = voteRequest
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(currentTerm)
 
     // Check if candidate’s log is at least as up-to-date as leader’s log (§5.4)
     val logOk =
       (candidateLastLogTerm > lastLogTerm) ||
-        (candidateLastLogTerm == lastLogTerm && candidateLogLength >= logState.logLength)
+        (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= (logState.logLength - 1))
 
     val termOk = candidateTerm > currentTerm
 
@@ -646,12 +646,13 @@ case class Leader(
       (newState, (response, actions))
     } else {
       // Reject vote but update replication progress for candidate to help log sync
-      val updatedSentLengthMap = this.sentLengthMap + (candidateAddress -> candidateLogLength)
-      val updatedAckLengthMap  = this.ackLengthMap + (candidateAddress  -> candidateLogLength)
-      val newState             = this.copy(sentLengthMap = updatedSentLengthMap, ackLengthMap = updatedAckLengthMap)
+      val candidateLastIndex = candidateLogIndex // convert length to index
+      val updatedSentIndexMap = this.sentIndexMap + (candidateAddress -> candidateLastIndex)
+      val updatedAckIndexMap  = this.ackIndexMap + (candidateAddress  -> candidateLastIndex)
+      val newState             = this.copy(sentIndexMap = updatedSentIndexMap, ackIndexMap = updatedAckIndexMap)
       val response             = VoteResponse(address, currentTerm, false)
       // Trigger replication to help candidate catch up
-      val actions = List(ReplicateLog(candidateAddress, currentTerm, candidateLogLength))
+      val actions = List(ReplicateLog(candidateAddress, currentTerm, candidateLastIndex))
       (newState, (response, actions))
     }
   }
@@ -700,16 +701,16 @@ case class Leader(
       val nextState = Follower(address, logRequest.term, currentLeader = Some(logRequest.leaderId))
       val actions   = List(StoreState, AnnounceLeader(logRequest.leaderId, resetPrevious = true))
 
-      val logLengthCheck = logState.logLength >= logRequest.prevSentLogLength
+      val logLengthCheck = logState.logLength > logRequest.prevSentLogIndex
       val termMatch =
-        logEntryAtPrevSent.map(_.term == logRequest.prevLastLogTerm).getOrElse(logRequest.prevSentLogLength == 0)
+        logEntryAtPrevSent.map(_.term == logRequest.prevLastLogTerm).getOrElse(logRequest.prevSentLogIndex == -1)
 
       if (logLengthCheck && termMatch) {
         // Log is consistent; accept entries
         val response = LogRequestResponse(
           address,
           logRequest.term,
-          logRequest.prevSentLogLength + logRequest.entries.length,
+          logRequest.prevSentLogIndex + 1 + logRequest.entries.length,
           success = true
         )
         (nextState, (response, actions))
@@ -774,29 +775,30 @@ case class Leader(
       (newState, List(StoreState, ResetLeaderAnnouncer))
     } else {
       if (success) {
-        // Replication succeeded: update sent and ack maps with follower’s ack length
-        val newSentLengthMap = sentLengthMap + (fromNodeId -> ackLogLength)
-        val newAckLengthMap  = ackLengthMap + (fromNodeId  -> ackLogLength)
+        // Replication succeeded: update sent and ack maps with follower's ack index
+        val ackLogIndex = ackLogLength - 1 // convert length to index
+        val newSentIndexMap = sentIndexMap + (fromNodeId -> ackLogIndex)
+        val newAckIndexMap  = ackIndexMap + (fromNodeId  -> ackLogIndex)
 
-        // Combine with self’s applied log length to determine commit indices
-        val combinedAckMap = newAckLengthMap + (address -> logState.appliedLogLength)
+        // Combine with self's applied log index to determine commit indices
+        val combinedAckMap = newAckIndexMap + (address -> logState.appliedLogIndex)
 
         // Trigger commit action: entries replicated on majority can now be applied (§5.4)
         val commitAction = CommitLogs(combinedAckMap)
-        (this.copy(sentLengthMap = newSentLengthMap, ackLengthMap = newAckLengthMap), List(commitAction))
+        (this.copy(sentIndexMap = newSentIndexMap, ackIndexMap = newAckIndexMap), List(commitAction))
 
       } else {
-        // Replication failed: decrease sentLength (nextIndex) for follower and retry (§5.3)
-        val updatedSentLength = sentLengthMap.get(fromNodeId) match {
-          case Some(sentLength) if sentLength > 0 => sentLength - 1
-          case _                                  => 0L
+        // Replication failed: decrease sentIndex (nextIndex) for follower and retry (§5.3)
+        val updatedSentIndex = sentIndexMap.get(fromNodeId) match {
+          case Some(sentIndex) if sentIndex > -1 => sentIndex - 1
+          case _                                 => -1L
         }
-        val newSentLengthMap = sentLengthMap + (fromNodeId -> updatedSentLength)
+        val newSentIndexMap = sentIndexMap + (fromNodeId -> updatedSentIndex)
 
-        // Retry log replication with lower prefixLength for conflict resolution
+        // Retry log replication with lower prefixIndex for conflict resolution
         (
-          this.copy(sentLengthMap = newSentLengthMap),
-          List(StoreState, ReplicateLog(fromNodeId, currentTerm, updatedSentLength))
+          this.copy(sentIndexMap = newSentIndexMap),
+          List(StoreState, ReplicateLog(fromNodeId, currentTerm, updatedSentIndex))
         )
       }
     }
@@ -804,7 +806,7 @@ case class Leader(
 
   def onReplicateLog(configCluster: ClusterConfiguration): List[Action] = {
     configCluster.members.filter(_ != address).map { node =>
-      ReplicateLog(node, currentTerm, sentLengthMap.getOrElse(node, 0L))
+      ReplicateLog(node, currentTerm, sentIndexMap.getOrElse(node, -1L))
     }
   }
 

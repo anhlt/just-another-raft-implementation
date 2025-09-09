@@ -9,13 +9,13 @@ import com.grok.raft.core.protocol._
  *   2. Sending periodic heartbeats (empty entries) to maintain leadership.
  *
  * Internally, `propagateLogs` will:
- *   1. Fetch the term of the log entry at (nextIndex - 1), defaulting to 0 if none.
- *   2. Retrieve all log entries from `nextIndex` through the end of the local log.
+ *   1. Fetch the term of the log entry at prevSentIndex, defaulting to 0 if none.
+ *   2. Retrieve all log entries from (prevSentIndex + 1) through the end of the local log.
  *   3. Read the current commit index from the `Log` interface.
  *   4. Construct a `LogRequest` payload with:
- *        - leaderId (this node’s ID)
+ *        - leaderId (this node's ID)
  *        - current term
- *        - prevSentLogLength = nextIndex - 1
+ *        - prevSentLogIndex = prevSentIndex (0-based)
  *        - prevLastLogTerm  = term of that previous entry
  *        - leaderCommit     = current commit index
  *        - entries          = the list of fetched LogEntry objects
@@ -24,4 +24,4 @@ import com.grok.raft.core.protocol._
  * @tparam F effect type (e.g. IO, Task, etc.)
  */
 trait LogPropagator[F[_]]:
-	def propagateLogs(peerId: NodeAddress, term: Long, nextIndex: Long): F[LogRequestResponse]	
+	def propagateLogs(peerId: NodeAddress, term: Long, prevSentIndex: Long): F[LogRequestResponse]	

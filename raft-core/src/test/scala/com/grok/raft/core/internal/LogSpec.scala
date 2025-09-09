@@ -20,7 +20,7 @@ class LogSpec extends CatsEffectSuite {
 
   }
 
-  test("truncateInconsistencyLog deletes all entries > leaderPrevLogLength when the last term mismatches") {
+  test("truncateInconsistencyLog deletes all entries > leaderPrevLogIndex when the last term mismatches") {
     for {
       log <- IO(new InMemoryLog[IO])
       store = log.logStorage
@@ -31,18 +31,18 @@ class LogSpec extends CatsEffectSuite {
       before <- store.currentLength
       _ = assertEquals(before, 3L)
 
-      // incoming head term = 1, but our last term = 2 → mismatch → deleteAfter(0)
+      // incoming head term = 1, but our last term = 2 → mismatch → deleteAfter(1)
       entries = List(LogEntry(1, 3, NoOp))
-      _ <- log.truncateInconsistencyLog(entries, leaderPrevLogLength = 1L, currentLogLength = 3L)
+      _ <- log.truncateInconsistencyLog(entries, leaderPrevLogIndex = 1L, currentLogIndex = 2L)
 
-      // only index 1 should remain
-      e1 <- store.get(0)
-      e2 <- store.get(1)
-      e3 <- store.get(2)
+      // indices 0 and 1 should remain, index 2 should be deleted
+      e0 <- store.get(0)
+      e1 <- store.get(1)
+      e2 <- store.get(2)
     } yield {
+      assert(e0.isDefined, "index 0 should remain")
       assert(e1.isDefined, "index 1 should remain")
       assert(e2.isEmpty, "index 2 should have been deleted")
-      assert(e3.isEmpty, "index 3 should have been deleted")
     }
   }
 
@@ -55,13 +55,13 @@ class LogSpec extends CatsEffectSuite {
       _ = assertEquals(before, 1L)
 
       // empty entries list → no deletion
-      _ <- log.truncateInconsistencyLog(Nil, leaderPrevLogLength = 0L, currentLogLength = 1L)
+      _ <- log.truncateInconsistencyLog(Nil, leaderPrevLogIndex = 0L, currentLogIndex = 0L)
 
       after <- store.currentLength
     } yield assertEquals(after, 1L)
   }
 
-  test("putEntries appends all new entries when leaderPrevLogLength + entries.size > currentLength") {
+  test("putEntries appends all new entries when leaderPrevLogIndex + entries.size > currentLogIndex") {
     for {
       log <- IO(new InMemoryLog[IO])
       store = log.logStorage
@@ -76,8 +76,8 @@ class LogSpec extends CatsEffectSuite {
         LogEntry(2, 2, NoOp),
         LogEntry(3, 3, NoOp)
       )
-      // 1 + 2 > 1 → keep both
-      _ <- log.putEntries(newEntries, leaderPrevLogLength = 1L, currentLogLength = 1L)
+      // 1 + 2 > 0 → keep both  
+      _ <- log.putEntries(newEntries, leaderPrevLogIndex = 1L, currentLogIndex = 0L)
 
       e2 <- store.get(2)
       e3 <- store.get(3)
@@ -98,8 +98,8 @@ class LogSpec extends CatsEffectSuite {
       curr <- store.currentLength
       _ = assertEquals(curr, 2L)
 
-      // leaderPrevLogLength + size(entries) = 2 + 0 <= 2 → drop all
-      _ <- log.putEntries(Nil, leaderPrevLogLength = 2L, currentLogLength = 2L)
+      // leaderPrevLogIndex + size(entries) = 1 + 0 <= 1 → drop all
+      _ <- log.putEntries(Nil, leaderPrevLogIndex = 1L, currentLogIndex = 1L)
 
       after <- store.currentLength
     } yield assertEquals(after, 2L)
@@ -131,7 +131,7 @@ class LogSpec extends CatsEffectSuite {
   }
 
   // 2) Test for commitLogs(...)
-  test("commitLogs should advance commitIndex when ackLengthMap reaches quorum") {
+  test("commitLogs should advance commitIndex when ackIndexMap reaches quorum") {
     // build a specialized TestLog whose membershipManager has quorum=2
 
     for {
@@ -144,20 +144,20 @@ class LogSpec extends CatsEffectSuite {
       _ <- log.setCommitLength(1L) // initial commitIndex = 1
 
       // map of acknowledgments from 3 nodes:
-      //  - "a" and "b" have seen up to index=2 (>=2)
-      //  - "c" only up to index=1
+      //  - "a" and "b" have seen up to index=1 (>=1)
+      //  - "c" only up to index=0
       acks = Map(
-        NodeAddress("a", 9090) -> 2L,
-        NodeAddress("b", 9090) -> 2L,
-        NodeAddress("c", 9090) -> 1L
+        NodeAddress("a", 9090) -> 1L,
+        NodeAddress("b", 9090) -> 1L,
+        NodeAddress("c", 9090) -> 0L
       )
 
       // invoke commitLogs
       result    <- log.commitLogs(acks)
       newCommit <- log.getCommittedLength
     } yield {
-      // because two nodes (a,b) acked index=2, which meets quorum=2,
-      // commitLogs should return true and the commitIndex should advance to 3 (2+1)
+      // because two nodes (a,b) acked index=1, which meets quorum=2,
+      // commitLogs should return true and the commitIndex should advance to 2 (1+1)
       assertEquals(result, true)
       assertEquals(newCommit, 2L)
     }

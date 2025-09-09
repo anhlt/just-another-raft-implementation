@@ -57,10 +57,10 @@ trait Log[F[_]]:
       *
       * @param entries
       *   The list of incoming log entries from the leader, used to check for term mismatches.
-      * @param leaderPrevLogLength
+      * @param leaderPrevLogIndex
       *   The index of the log entry in the leader's log immediately preceding the new entries.
-      * @param currentLogLength
-      *   The current length of the local log, to identify the last entry for comparison.
+      * @param currentLogIndex
+      *   The current last index of the local log, to identify the last entry for comparison.
       * @return
       *   F[Unit] An effect that performs the truncation operation if an inconsistency is found, or does nothing
       *   otherwise.
@@ -74,16 +74,16 @@ trait Log[F[_]]:
       *   safety in distributed consensus.
       */
 
-  def truncateInconsistencyLog(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using
+  def truncateInconsistencyLog(entries: List[LogEntry], leaderPrevLogIndex: Long, currentLogIndex: Long)(using
       Monad[F],
       Logger[F]
   ): F[Unit] =
-    if (entries.nonEmpty && currentLogLength > leaderPrevLogLength) {
+    if (entries.nonEmpty && currentLogIndex > leaderPrevLogIndex) {
       for {
-        lastEntryOnCurrentNode <- logStorage.getAtLength(currentLogLength)
+        lastEntryOnCurrentNode <- logStorage.get(currentLogIndex)
         result <-
           if (lastEntryOnCurrentNode.isDefined && lastEntryOnCurrentNode.get.term != entries.head.term)
-            logStorage.truncateList(leaderPrevLogLength)
+            logStorage.truncateList(leaderPrevLogIndex + 1)
           else Monad[F].unit
 
       } yield result
@@ -100,10 +100,10 @@ trait Log[F[_]]:
     *
     * @param entries
     *   The list of log entries to append to the log.
-    * @param leaderPrevLogLength
+    * @param leaderPrevLogIndex
     *   The index up to which the log is known to be consistent, used to position new entries correctly.
-    * @param currentLogLength
-    *   The current length of the local log, for reference in appending or updating the log state.
+    * @param currentLogIndex
+    *   The current last index of the local log, for reference in appending or updating the log state.
     * @return
     *   F[Unit] An effect that performs the append operation; it does not return a value but may handle errors or
     *   logging.
@@ -114,12 +114,12 @@ trait Log[F[_]]:
     *   consistency. This function may involve transactional updates to ensure durability, as described in the paper's
     *   commitment rules.
     */
-  def putEntries(entries: List[LogEntry], leaderPrevLogLength: Long, currentLogLength: Long)(using
+  def putEntries(entries: List[LogEntry], leaderPrevLogIndex: Long, currentLogIndex: Long)(using
       Monad[F],
       Logger[F]
   ): F[Unit] = 
-    val logEntries = if (leaderPrevLogLength + entries.size > currentLogLength) {
-      entries.drop((currentLogLength - leaderPrevLogLength).toInt)
+    val logEntries = if (leaderPrevLogIndex + entries.size > currentLogIndex) {
+      entries.drop((currentLogIndex - leaderPrevLogIndex).toInt)
     } else List.empty[LogEntry]
 
     logEntries.traverse { entry =>
@@ -136,7 +136,7 @@ trait Log[F[_]]:
     *
     * @param entries
     *   The list of log entries to append, each containing a command and its associated term.
-    * @param leaderPrevLogLength
+    * @param leaderPrevLogIndex
     *   The index of the log entry in the leader's log immediately preceding the new entries, used for consistency
     *   checking (corresponds to prevLogIndex in Raft).
     * @param leaderCommit
@@ -153,16 +153,17 @@ trait Log[F[_]]:
     *   This operation depends on Monad and Logger effects for asynchronous behavior and logging. It ensures the Log
     *   Matching Property by rejecting or truncating inconsistent logs.
     */
-  def appendEntries(entries: List[LogEntry], leaderPrevLogLength: Long, leaderCommit: Long)(using
+  def appendEntries(entries: List[LogEntry], leaderPrevLogIndex: Long, leaderCommit: Long)(using
       MonadThrow[F],
       Logger[F]
   ): F[Boolean] =
     transactional {
       for {
         currentLogLength <- logStorage.currentLength
+        currentLogIndex = currentLogLength - 1
         appliedLength    <- getCommittedLength
-        _                <- truncateInconsistencyLog(entries, leaderPrevLogLength, currentLogLength)
-        _                <- putEntries(entries, leaderPrevLogLength, currentLogLength)
+        _                <- truncateInconsistencyLog(entries, leaderPrevLogIndex, currentLogIndex)
+        _                <- putEntries(entries, leaderPrevLogIndex, currentLogIndex)
         committed        <- (appliedLength to leaderCommit).toList.traverse(commitLog)
 
         _ <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
@@ -189,30 +190,30 @@ trait Log[F[_]]:
     *      - Verifies quorum acknowledgment
     *      - Attempts to commit entries that have reached quorum
     *
-    * @param ackLengthMap
-    *   A map of node addresses to their acknowledged log lengths
+    * @param ackIndexMap
+    *   A map of node addresses to their acknowledged log indices
     * @return
     *   A wrapped boolean value indicating whether any new entries were committed (true) or not (false)
     */
-  def commitLogs(ackLengthMap: Map[NodeAddress, Long])(using MonadThrow[F], Logger[F]): F[Boolean] = {
+  def commitLogs(ackIndexMap: Map[NodeAddress, Long])(using MonadThrow[F], Logger[F]): F[Boolean] = {
     for {
       currentLength  <- logStorage.currentLength
       commitedLength <- getCommittedLength
       _              <- trace"Current length: $currentLength, Committed length: $commitedLength"
-      _              <- trace"Received ackLengthMap: $ackLengthMap"
+      _              <- trace"Received ackIndexMap: $ackIndexMap"
       _              <- trace"Checking for quorum"
-      commited       <- (commitedLength + 1 to currentLength).toList.traverse(commitIfMatch(ackLengthMap, _))
+      commited       <- (commitedLength + 1 to currentLength).toList.traverse(commitIfMatch(ackIndexMap, _))
       _              <- trace"all log commited"
     } yield commited.contains(true) || commited.isEmpty
   }
 
-  def commitIfMatch(ackedLengthMap: Map[NodeAddress, Long], lenght: Long)(using
+  def commitIfMatch(ackedIndexMap: Map[NodeAddress, Long], lenght: Long)(using
       MonadThrow[F],
       Logger[F]
   ): F[Boolean] = {
     for {
       config <- membershipManager.getClusterConfiguration
-      ackedCount = ackedLengthMap.count { case (_, length) => length >= lenght }
+      ackedCount = ackedIndexMap.count { case (_, index) => index >= (lenght - 1) } // convert length to index for comparison
       _      <- trace"ackedCount: ${ackedCount}, config: ${config.members.size}"
       result <- if (ackedCount >= config.quorumSize) commitLog(lenght) *> Monad[F].pure(true) else Monad[F].pure(false)
     } yield (result)
@@ -224,7 +225,7 @@ trait Log[F[_]]:
   ): F[Unit] = {
     for {
       _ <- trace"Attempting to commit log entry at length: ${lenght}"
-      logEntry <- logStorage.getAtLength(lenght)
+      logEntry <- logStorage.get(lenght - 1)
       _        <- logEntry match {
         case Some(entry) => Monad[F].pure(entry)
         case None        => MonadThrow[F].raiseError(LogError("Log entry not found for commit."))
