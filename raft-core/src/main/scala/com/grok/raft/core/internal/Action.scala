@@ -18,22 +18,22 @@ case class RequestForVote(peerId: NodeAddress, request: VoteRequest) extends Act
  *
  * The leader uses this action to synchronize a follower's log with its own,
  * ensuring consistency across the cluster. It sends log entries starting from
- * the specified prefixLength, along with periodic heartbeats to maintain node
+ * the specified prefixIndex, along with periodic heartbeats to maintain node
  * connectivity.
  *
  * Parameters:
  *   - peerId: The network address of the follower.
  *   - term: The current term of the leader, validating the log replication.
- *   - prefixLength: The log index that indicates where replication should begin.
+ *   - prefixIndex: The log index (0-based) that indicates the last sent entry.
  *
  * Example:
- *   If a follower's log length is 5 and the leader's log length is 10, the leader
- *   uses this action to send the log entries beginning at index 5.
+ *   If a follower's last acknowledged index is 4, the leader uses this action
+ *   to send the log entries beginning at index 5.
  */
-case class ReplicateLog(peerId: NodeAddress, term: Long, prefixLength: Long) extends Action
+case class ReplicateLog(peerId: NodeAddress, term: Long, prefixIndex: Long) extends Action
 
 
-case class CommitLogs(ackLengthMap: Map[NodeAddress, Long])                        extends Action
+case class CommitLogs(ackIndexMap: Map[NodeAddress, Long])                        extends Action
 
 
 /**
