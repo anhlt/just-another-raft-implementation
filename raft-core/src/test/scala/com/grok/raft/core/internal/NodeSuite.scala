@@ -15,8 +15,8 @@ class NodeSuite extends FunSuite {
   val addrB = TestData.addr2
   val addrC = TestData.addr3
 
-  def emptyLogState = LogState(logLength = 0L, lastLogTerm = None)
-  def smallLogState  = LogState(logLength = 4L, lastLogTerm = Some(2L))
+  def emptyLogState = LogState(logLength = 0L, lastLogTerm = None, appliedLogIndex = -1L)
+  def smallLogState  = LogState(logLength = 4L, lastLogTerm = Some(2L), appliedLogIndex = 2L)
 
   // Create a “dummy” follower to pass into ClusterConfiguration
   private val dummyFollower = Follower(address = addrA, currentTerm = 0L)
@@ -74,7 +74,7 @@ class NodeSuite extends FunSuite {
     val voteReq = VoteRequest(
       proposedLeaderAddress = addrB,
       candidateTerm         = 2L,
-      candidateLogLength    = 5L,
+      candidateLogIndex     = 4L,
       candidateLastLogTerm  = 3L
     )
 
@@ -98,7 +98,7 @@ class NodeSuite extends FunSuite {
   test("Candidate.onVoteRequest rejects stale term or log") {
     val cand = Candidate(address = addrA, currentTerm = 5L)
     // lower term => automatic reject
-    val badReq = VoteRequest(addrB, candidateTerm = 3L, candidateLogLength = 100L, candidateLastLogTerm = 10L)
+    val badReq = VoteRequest(addrB, candidateTerm = 3L, candidateLogIndex = 99L, candidateLastLogTerm = 10L)
 
     val (nextNode, (resp, actions)) =
       cand.onVoteRequest(badReq, smallLogState, clusterConfig)
@@ -142,7 +142,7 @@ class NodeSuite extends FunSuite {
     val req = LogRequest(
       leaderId          = addrB,
       term              = 1L,
-      prevSentLogLength = 0L,
+      prevSentLogIndex  = -1L,
       prevLastLogTerm   = 0L,
       entries           = entries,
       leaderCommit      = 0L
@@ -166,7 +166,7 @@ class NodeSuite extends FunSuite {
     val req = LogRequest(
       leaderId          = addrB,
       term              = 3L, // stale
-      prevSentLogLength = 0L,
+      prevSentLogIndex  = -1L,
       prevLastLogTerm   = 0L,
       entries           = Nil,
       leaderCommit      = 0L
