@@ -83,7 +83,7 @@ trait Log[F[_]]:
         lastEntryOnCurrentNode <- logStorage.get(currentLogIndex)
         result <-
           if (lastEntryOnCurrentNode.isDefined && lastEntryOnCurrentNode.get.term != entries.head.term)
-            logStorage.truncateList(leaderPrevLogIndex + 1)
+            logStorage.deleteAfter(leaderPrevLogIndex)
           else Monad[F].unit
 
       } yield result
