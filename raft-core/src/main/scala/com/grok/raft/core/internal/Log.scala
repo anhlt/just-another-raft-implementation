@@ -34,16 +34,16 @@ trait Log[F[_]]:
     * @return
     *   The current commit index wrapped in effect type F
     */
-  def getCommittedLength: F[Long]
+  def getCommittedIndex: F[Long]
 
   /** Updates the commit index to a new value.
     *
     * @param index
-    *   The new commit index value
+    *   The new commit index value (0-based)
     * @return
     *   Unit wrapped in effect type F
     */
-  def setCommitLength(index: Long): F[Unit]
+  def setCommitIndex(index: Long): F[Unit]
 
   def state: F[LogState]
 
@@ -159,12 +159,11 @@ trait Log[F[_]]:
   ): F[Boolean] =
     transactional {
       for {
-        currentLogLength <- logStorage.currentLength
-        currentLogIndex = currentLogLength - 1
-        appliedLength    <- getCommittedLength
+        currentLogIndex  <- logStorage.lastIndex
+        appliedIndex     <- getCommittedIndex
         _                <- truncateInconsistencyLog(entries, leaderPrevLogIndex, currentLogIndex)
         _                <- putEntries(entries, leaderPrevLogIndex, currentLogIndex)
-        committed        <- (appliedLength to leaderCommit).toList.traverse(commitLog)
+        committed        <- ((appliedIndex + 1) to leaderCommit).toList.traverse(length => commitLog(length - 1))
 
         _ <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
       } yield committed.nonEmpty
@@ -173,7 +172,7 @@ trait Log[F[_]]:
   def append[T](term: Long, command: Command[T], deferred: RaftDeferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
     transactional {
       for {
-        lastIndex <- logStorage.currentLength
+        lastIndex <- logStorage.lastIndex
         logEntry = LogEntry(term, lastIndex + 1, command)
         _ <- trace"Appending a command to the log. Term: ${term}, Index: ${lastIndex + 1}"
         _ <- logStorage.put(logEntry.index, logEntry)
@@ -197,42 +196,42 @@ trait Log[F[_]]:
     */
   def commitLogs(ackIndexMap: Map[NodeAddress, Long])(using MonadThrow[F], Logger[F]): F[Boolean] = {
     for {
-      currentLength  <- logStorage.currentLength
-      commitedLength <- getCommittedLength
-      _              <- trace"Current length: $currentLength, Committed length: $commitedLength"
+      lastLogIndex   <- logStorage.lastIndex
+      commitedIndex  <- getCommittedIndex
+      _              <- trace"Last log index: $lastLogIndex, Committed index: $commitedIndex"
       _              <- trace"Received ackIndexMap: $ackIndexMap"
       _              <- trace"Checking for quorum"
-      commited       <- (commitedLength + 1 to currentLength).toList.traverse(commitIfMatch(ackIndexMap, _))
+      commited       <- ((commitedIndex + 1) to lastLogIndex).toList.traverse(index => commitIfMatch(ackIndexMap, index))
       _              <- trace"all log commited"
     } yield commited.contains(true) || commited.isEmpty
   }
 
-  def commitIfMatch(ackedIndexMap: Map[NodeAddress, Long], lenght: Long)(using
+  def commitIfMatch(ackedIndexMap: Map[NodeAddress, Long], index: Long)(using
       MonadThrow[F],
       Logger[F]
   ): F[Boolean] = {
     for {
       config <- membershipManager.getClusterConfiguration
-      ackedCount = ackedIndexMap.count { case (_, index) => index >= (lenght - 1) } // convert length to index for comparison
+      ackedCount = ackedIndexMap.count { case (_, ackedIndex) => ackedIndex >= index } // direct index comparison
       _      <- trace"ackedCount: ${ackedCount}, config: ${config.members.size}"
-      result <- if (ackedCount >= config.quorumSize) commitLog(lenght) *> Monad[F].pure(true) else Monad[F].pure(false)
+      result <- if (ackedCount >= config.quorumSize) commitLog(index) *> Monad[F].pure(true) else Monad[F].pure(false)
     } yield (result)
   }
 
-  def commitLog(lenght: Long)(using
+  def commitLog(index: Long)(using
       MonadThrow[F],
       Logger[F]
   ): F[Unit] = {
     for {
-      _ <- trace"Attempting to commit log entry at length: ${lenght}"
-      logEntry <- logStorage.get(lenght - 1)
+      _ <- trace"Attempting to commit log entry at index: ${index}"
+      logEntry <- logStorage.get(index)
       _        <- logEntry match {
         case Some(entry) => Monad[F].pure(entry)
         case None        => MonadThrow[F].raiseError(LogError("Log entry not found for commit."))
       }
       _        <- trace"Committing log entry: ${logEntry}"
       _        <- applyCommand(logEntry.get.index, logEntry.get.command)
-      _        <- setCommitLength(logEntry.get.index + 1)
+      _        <- setCommitIndex(logEntry.get.index)
       _        <- trace"Log entry committed: ${logEntry}"
     } yield ()
   }

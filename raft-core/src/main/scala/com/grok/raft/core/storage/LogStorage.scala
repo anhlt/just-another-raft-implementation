@@ -4,7 +4,7 @@ import com.grok.raft.core.internal._
 
 trait LogStorage[F[_]]:
 
-  def currentLength: F[Long]
+  def lastIndex: F[Long]
 
   def get(index: Long): F[Option[LogEntry]]
 

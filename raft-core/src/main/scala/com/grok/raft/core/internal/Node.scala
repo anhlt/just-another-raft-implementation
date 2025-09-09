@@ -157,7 +157,7 @@ case class Follower(
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= (logState.logLength - 1))
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= logState.lastLogIndex)
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -328,7 +328,7 @@ case class Candidate(
     val newLastLogTerm =
       logState.lastLogTerm.getOrElse(0L) // Potential bug. Need to check later
     val voteRequest =
-      VoteRequest(address, newTerm, logState.logLength - 1, newLastLogTerm)
+      VoteRequest(address, newTerm, logState.lastLogIndex, newLastLogTerm)
 
     val actions = clusterConfiguration.members
       .filterNot(_ == address)
@@ -364,7 +364,7 @@ case class Candidate(
 
     val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
     val logOk =
-      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= (logState.logLength - 1))
+      (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= logState.lastLogIndex)
 
     val termOk =
       candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
@@ -405,7 +405,7 @@ case class Candidate(
 
     val newVoteReceived =
       if (voteGranted) voteReceived + responseAddress else voteReceived
-    val logIndex = logState.logLength - 1
+    val logIndex = logState.lastLogIndex
 
     if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
       // construct the leader state
