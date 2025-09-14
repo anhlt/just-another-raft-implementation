@@ -2,7 +2,7 @@ import org.typelevel.sbt.tpolecat.*
 
 inThisBuild(
   Seq(
-    scalaVersion               := "3.7.2",
+    scalaVersion               := "3.7.3",
     organization               := "com.grok.raft",
     tpolecatDefaultOptionsMode := VerboseMode
   )
