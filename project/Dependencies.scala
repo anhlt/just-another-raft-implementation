@@ -11,7 +11,7 @@ object Dependencies {
   val catsEffectKernel = Def.setting("org.typelevel" %% "cats-effect-kernel" % "3.6.3")
   val catsEffectStd    = Def.setting("org.typelevel" %% "cats-effect-std" % "3.6.3")
 
-  val munit            = Def.setting("org.scalameta" %% "munit" % "1.1.0" % Test)
+  val munit            = Def.setting("org.scalameta" %% "munit" % "1.1.2" % Test)
   val munitCatsEffect  = Def.setting("org.typelevel" %% "munit-cats-effect" % "2.1.0" % Test)
   val munitScalaCheck  = Def.setting("org.scalameta" %% "munit-scalacheck" % "1.1.0" % Test)
   val scalaCheck       = Def.setting("org.scalacheck" %% "scalacheck" % "1.16.0" % Test)
