@@ -10,7 +10,7 @@ import scala.concurrent.duration.*
 import com.grok.raft.core.internal.RaftDeferred
 import com.grok.raft.core.storage.*
 
-trait Raft[F[_]] {
+trait Raft[F[_], T] {
 
   val config: ClusterConfiguration
 
@@ -20,7 +20,7 @@ trait Raft[F[_]] {
 
   val logPropagator: LogPropagator[F]
 
-  val log: Log[F]
+  val log: Log[F, T]
 
   val stateStorage: StateStorage[F]
 
