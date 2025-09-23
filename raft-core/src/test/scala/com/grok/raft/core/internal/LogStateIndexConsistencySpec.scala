@@ -42,7 +42,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.commitLogs should advance commit index based on quorum acknowledgments") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with entries
@@ -71,7 +71,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.commitLogs should handle no majority case") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with entries
@@ -99,7 +99,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.commitLogs should handle progressive commit advancement") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with entries
@@ -139,7 +139,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.append should correctly calculate next index") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Start with empty log
@@ -167,7 +167,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.putEntries should handle index calculations correctly") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with some entries
@@ -203,7 +203,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.putEntries should drop entries when they would duplicate existing ones") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with entries up to index 4
@@ -239,7 +239,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.putEntries should handle empty entries list") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with some entries
@@ -258,7 +258,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.truncateInconsistencyLog should handle term mismatch correctly") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate: indices 0→term1, 1→term1, 2→term2
@@ -289,7 +289,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.truncateInconsistencyLog should be no-op when terms match") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate
@@ -317,7 +317,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.truncateInconsistencyLog should be no-op with empty entries") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       _ <- store.put(0, LogEntry(1, 0, NoOp))
@@ -333,7 +333,7 @@ class LogStateIndexConsistencySpec extends CatsEffectSuite {
 
   test("Log.truncateInconsistencyLog should be no-op when currentLogIndex <= leaderPrevLogIndex") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       _ <- store.put(0, LogEntry(1, 0, NoOp))

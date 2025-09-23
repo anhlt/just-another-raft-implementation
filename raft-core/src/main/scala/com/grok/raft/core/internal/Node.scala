@@ -249,7 +249,7 @@ case class Follower(
           List(
             AnnounceLeader(
               leaderId = leaderId,
-               resetPrevious = true // reset when leader changes
+              resetPrevious = currentLeader.isDefined // reset only if there was a previous leader
             )
           )
         else List.empty[Action]
