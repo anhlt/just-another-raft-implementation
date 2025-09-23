@@ -9,15 +9,15 @@ import munit.CatsEffectSuite
 import scala.concurrent.duration.*
 import com.grok.raft.core.storage.*
 
-class TestRaft[F[_]: Async](
+class TestRaft[F[_]: Async, T](
     override val config: ClusterConfiguration,
     override val leaderAnnouncer: LeaderAnnouncer[F],
     override val membershipManager: MembershipManager[F],
     override val logPropagator: LogPropagator[F],
-    override val log: Log[F],
+    override val log: Log[F, T],
     override val stateStorage: StateStorage[F],
     override val rpcClient: RpcClient[F]
-) extends Raft[F] {
+) extends Raft[F, T] {
 
   override def deferred[A]: F[RaftDeferred[F, A]] = {
 
@@ -81,12 +81,12 @@ class RaftElectionSpec extends CatsEffectSuite {
       rpcClient = makeRpcClient[IO]
 
       // 3) Build our TestRaft, overriding schedule to run immediately
-      raft = new TestRaft[IO](
+      raft = new TestRaft[IO, String](
         config = baseConfig,
         leaderAnnouncer = announcer,
         membershipManager = new DummyMembershipManager[IO],
         logPropagator = new DummyLogPropagator[IO],
-        log = new InMemoryLog[IO],
+        log = new InMemoryLog[IO, String],
         stateStorage = new InMemoryStateStorage[IO],
         rpcClient = rpcClient
       )

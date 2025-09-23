@@ -8,19 +8,21 @@ import scala.concurrent.duration._
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.syntax.*
 import com.grok.raft.core.*
+import com.grok.raft.core.storage.*
 import com.grok.raft.core.internal.*
 
-class RaftImlp[F[_]: {Sync, Temporal}](
+class RaftImlp[F[_]: {Sync, Temporal}, T](
     val config: ClusterConfiguration,
     val leaderAnnouncer: LeaderAnnouncer[F],
     val membershipManager: MembershipManager[F],
-    val log: Log[F],
+    val log: Log[F, T],
     val rpcClient: RpcClient[F],
     val logPropagator: LogPropagator[F],
+    val stateStorage: StateStorage[F],
     currentStateRef: Ref[F, Node],
     isRunning: Ref[F, Boolean],
     lastHeartbeatRef: Ref[F, Long],
-) extends Raft[F]:
+) extends Raft[F, T]:
 
 
   override def deferred[A]: F[RaftDeferred[F, A]] = ???

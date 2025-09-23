@@ -27,7 +27,7 @@ val commonSettings = Seq(
     Dependencies.scalaCheck.value,
     Dependencies.munitScalaCheck.value,
     Dependencies.munitScalaCheckEffect.value,
-    Dependencies.fory.value
+    Dependencies.scalaCheckEffect.value
   )
 )
 

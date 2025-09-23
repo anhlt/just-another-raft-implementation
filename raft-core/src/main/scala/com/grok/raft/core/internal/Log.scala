@@ -35,11 +35,11 @@ trait Log[F[_], T]:
     for {
       snapshot <- snapshotStorage.retrieveSnapshot
       _ <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
-      commitLength <- getCommittedLength
+      committedIndex <- getCommittedIndex
       stateMachineIndex <- stateMachine.appliedIndex
       _ <- {
-        if (stateMachineIndex > commitLength - 1) setCommitLength(stateMachineIndex + 1)
-        else (stateMachineIndex to commitLength).toList.traverse(commitLog).void
+        if (stateMachineIndex > committedIndex) setCommitIndex(stateMachineIndex)
+        else (stateMachineIndex to committedIndex).toList.traverse(commitLog).void
       } 
     } yield ()
 
@@ -279,13 +279,69 @@ trait Log[F[_], T]:
   def applyReadCommand[T](command: ReadCommand[?])(using MonadThrow[F]): F[T] =
     stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
 
-  def compactLogs(): F[Unit] 
+  def compactLogs()(using MonadThrow[F], Logger[F]): F[Unit] = {
+    for {
+      appliedIndex <- stateMachine.appliedIndex
+      shouldCompact <- shouldCreateSnapshot()
+      _ <- trace"Starting log compaction up to applied index: $appliedIndex, should compact: $shouldCompact"
+      _ <- if (appliedIndex > 0 && shouldCompact) {
+        for {
+          snapshot <- createSnapshot(appliedIndex)
+          _ <- logStorage.deleteBefore(appliedIndex)
+          _ <- trace"Log entries before index $appliedIndex have been compacted"
+        } yield ()
+      } else Monad[F].unit
+    } yield ()
+  }
+
+  def createSnapshot(lastIndex: Long)(using MonadThrow[F], Logger[F]): F[Snapshot[T]] = {
+    for {
+      _ <- trace"Creating snapshot up to index: $lastIndex"
+      currentState <- stateMachine.getCurrentState
+      config <- membershipManager.getClusterConfiguration
+      snapshot = Snapshot(lastIndex, currentState, config)
+      _ <- snapshotStorage.persistSnapshot(snapshot)
+      _ <- trace"Snapshot created and persisted for index: $lastIndex"
+    } yield snapshot
+  }
+
+  def shouldCreateSnapshot()(using Monad[F]): F[Boolean] = {
+    for {
+      lastLogIndex <- logStorage.lastIndex
+      appliedIndex <- stateMachine.appliedIndex
+      lastSnapshot <- snapshotStorage.retrieveSnapshot
+      lastSnapshotIndex = lastSnapshot.map(_.lastIndex).getOrElse(0L)
+      logsSinceSnapshot = appliedIndex - lastSnapshotIndex
+    } yield logsSinceSnapshot > 1000
+  }
+
+  def installSnapshot(snapshot: Snapshot[T])(using MonadThrow[F], Logger[F]): F[Unit] = {
+    transactional {
+      for {
+        _ <- trace"Installing snapshot with last index: ${snapshot.lastIndex}"
+        _ <- snapshotStorage.persistSnapshot(snapshot)
+        _ <- restoreSnapshot(snapshot)
+        _ <- logStorage.deleteAfter(snapshot.lastIndex)
+        _ <- setCommitIndex(snapshot.lastIndex)
+        _ <- trace"Snapshot installed successfully"
+      } yield ()
+    }
+  }
+
+  def getSnapshotMetadata()(using Monad[F]): F[Option[(Long, ClusterConfiguration)]] = {
+    for {
+      snapshot <- snapshotStorage.retrieveSnapshot
+    } yield snapshot.map(s => (s.lastIndex, s.config))
+  } 
 
   def restoreSnapshot[T](snapshot: Snapshot[T])(using
       Monad[F],
       Logger[F]
   ): F[Unit] = 
     for {
+      _ <- trace"Restoring snapshot with last index: ${snapshot.lastIndex}"
       _ <- membershipManager.setClusterConfiguration(snapshot.config)
       _ <- stateMachine.restoreSnapshot(snapshot.lastIndex, snapshot.data)
+      _ <- setCommitIndex(snapshot.lastIndex)
+      _ <- trace"Snapshot restored successfully"
     } yield ()

@@ -4,6 +4,7 @@ import cats.*
 import cats.effect.*
 import cats.effect.kernel.{Deferred => EffectDeferred}
 import com.grok.raft.core.*
+import com.grok.raft.core.storage.Snapshot
 import munit.CatsEffectSuite
 
 
@@ -22,7 +23,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("truncateInconsistencyLog deletes all entries > leaderPrevLogIndex when the last term mismatches") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
       // populate indices 0→term0, 1→term1, 2→term2
       _      <- store.put(0, LogEntry(0, 0, NoOp))
@@ -48,7 +49,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("truncateInconsistencyLog is a no‐op when there is no mismatch or entries is empty") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
       _      <- store.put(1, LogEntry(5, 1, NoOp))
       before <- store.lastIndex
@@ -63,7 +64,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("putEntries appends all new entries when leaderPrevLogIndex + entries.size > currentLogIndex") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
 
       // pre‐populate index 1
@@ -89,7 +90,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("putEntries does nothing when there are no new entries to append") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
 
       // pre‐populate two entries
@@ -107,7 +108,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("append should persist a LogEntry with the correct term and index") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, String])
       // start with an empty log; lastIndex == -1
       beforeLen <- log.logStorage.lastIndex
       _ = assertEquals(beforeLen, -1L)
@@ -135,7 +136,7 @@ class LogSpec extends CatsEffectSuite {
     // build a specialized TestLog whose membershipManager has quorum=2
 
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
 
       // populate two entries
@@ -160,6 +161,128 @@ class LogSpec extends CatsEffectSuite {
       // commitLogs should return true and the commitIndex should advance to 1
       assertEquals(result, true)
       assertEquals(newCommit, 1L)
+    }
+  }
+
+  // Snapshot tests
+  test("createSnapshot should capture current state and persist it") {
+    for {
+      log <- IO(new InMemoryLog[IO, String])
+      _ <- log.stateMachine.restoreSnapshot(5L, "test-state")
+      config <- log.membershipManager.getClusterConfiguration
+      
+      snapshot <- log.createSnapshot(5L)
+      retrieved <- log.snapshotStorage.retrieveSnapshot
+    } yield {
+      assertEquals(snapshot.lastIndex, 5L)
+      assertEquals(snapshot.data, "test-state")
+      assertEquals(snapshot.config, config)
+      assert(retrieved.isDefined)
+      assertEquals(retrieved.get, snapshot)
+    }
+  }
+
+  test("installSnapshot should restore state and truncate log") {
+    for {
+      log <- IO(new InMemoryLog[IO, String])
+      store = log.logStorage
+      
+      // populate some log entries
+      _ <- store.put(1, LogEntry(1, 1, NoOp))
+      _ <- store.put(2, LogEntry(1, 2, NoOp))
+      _ <- store.put(3, LogEntry(1, 3, NoOp))
+      
+      config <- log.membershipManager.getClusterConfiguration
+      snapshot = Snapshot(2L, "snapshot-state", config)
+      
+      _ <- log.installSnapshot(snapshot)
+      
+      // Check state was restored
+      state <- log.stateMachine.getCurrentState
+      appliedIndex <- log.stateMachine.appliedIndex
+      commitIndex <- log.getCommittedIndex
+      
+      // Check log was truncated
+      e1 <- store.get(1)
+      e2 <- store.get(2)
+      e3 <- store.get(3)
+    } yield {
+      assertEquals(state, "snapshot-state")
+      assertEquals(appliedIndex, 2L)
+      assertEquals(commitIndex, 2L)
+      assert(e1.isDefined, "entry 1 should remain")
+      assert(e2.isDefined, "entry 2 should remain")
+      assert(e3.isEmpty, "entry 3 should be deleted")
+    }
+  }
+
+  test("shouldCreateSnapshot should return true when logs exceed threshold") {
+    for {
+      log <- IO(new InMemoryLog[IO, String])
+      
+      // Set applied index to simulate many logs since last snapshot
+      _ <- log.stateMachine.restoreSnapshot(1500L, "state")
+      
+      shouldCreate <- log.shouldCreateSnapshot()
+    } yield {
+      assertEquals(shouldCreate, true)
+    }
+  }
+
+  test("shouldCreateSnapshot should return false when logs are under threshold") {
+    for {
+      log <- IO(new InMemoryLog[IO, String])
+      
+      // Set applied index to simulate few logs since last snapshot
+      _ <- log.stateMachine.restoreSnapshot(100L, "state")
+      
+      shouldCreate <- log.shouldCreateSnapshot()
+    } yield {
+      assertEquals(shouldCreate, false)
+    }
+  }
+
+  test("getSnapshotMetadata should return latest snapshot info") {
+    for {
+      log <- IO(new InMemoryLog[IO, String])
+      config <- log.membershipManager.getClusterConfiguration
+      snapshot = Snapshot(10L, "meta-state", config)
+      
+      _ <- log.snapshotStorage.persistSnapshot(snapshot)
+      metadata <- log.getSnapshotMetadata()
+    } yield {
+      assert(metadata.isDefined)
+      assertEquals(metadata.get._1, 10L)
+      assertEquals(metadata.get._2, config)
+    }
+  }
+
+  test("compactLogs should create snapshot and delete old entries when threshold is met") {
+    for {
+      log <- IO(new InMemoryLog[IO, String])
+      store = log.logStorage
+      
+      // Set up state to trigger compaction
+      _ <- log.stateMachine.restoreSnapshot(1500L, "compact-state")
+      
+      // Add some log entries
+      _ <- store.put(1498, LogEntry(1, 1498, NoOp))
+      _ <- store.put(1499, LogEntry(1, 1499, NoOp))
+      _ <- store.put(1500, LogEntry(1, 1500, NoOp))
+      
+      _ <- log.compactLogs()
+      
+      // Check snapshot was created
+      snapshot <- log.snapshotStorage.retrieveSnapshot
+      
+      // Check entries before applied index were deleted
+      e1498 <- store.get(1498)
+      e1500 <- store.get(1500)
+    } yield {
+      assert(snapshot.isDefined)
+      assertEquals(snapshot.get.lastIndex, 1500L)
+      assert(e1498.isEmpty, "entry 1498 should be deleted")
+      assert(e1500.isDefined, "entry 1500 should remain")
     }
   }
 

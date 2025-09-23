@@ -30,3 +30,4 @@ trait StateMachine[F[_], T]:
   def applyRead: PartialFunction[ReadCommand[?], F[Any]]
   def appliedIndex: F[Long]
   def restoreSnapshot[T](lastIndex: Long, data: T): F[Unit]
+  def getCurrentState: F[T]
