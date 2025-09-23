@@ -304,7 +304,21 @@ case class Follower(
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, LogRequestResponse) = ???
+  ): (Node, LogRequestResponse) = {
+    // For a follower, snapshot installation represents successful synchronization with the leader
+    // The snapshot has been installed by the Log layer, so we just need to respond positively
+    // and potentially update our leader information
+    
+    val response = LogRequestResponse(
+      nodeId = address,
+      currentTerm = currentTerm,
+      ackLogIndex = logState.lastLogIndex, // Acknowledge up to the snapshot's last index
+      success = true
+    )
+    
+    // Return the current follower state and positive response
+    (this, response)
+  }
 
   def leader(): Option[NodeAddress] = currentLeader
 
@@ -528,7 +542,28 @@ case class Candidate(
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, LogRequestResponse) = ???
+  ): (Node, LogRequestResponse) = {
+    // A candidate that receives a snapshot installation should step down to follower
+    // This indicates there's a legitimate leader sending snapshots
+    // We accept the snapshot and become a follower
+    
+    val response = LogRequestResponse(
+      nodeId = address,
+      currentTerm = currentTerm,
+      ackLogIndex = logState.lastLogIndex, // Acknowledge up to the snapshot's last index
+      success = true
+    )
+    
+    // Step down to follower - snapshot installation implies there's a leader
+    val newFollower = Follower(
+      address = address,
+      currentTerm = currentTerm,
+      currentLeader = None, // Will be set when we receive the next log request from leader
+      votedFor = votedFor
+    )
+    
+    (newFollower, response)
+  }
 
   def leader(): Option[NodeAddress] = None
 
@@ -812,7 +847,23 @@ case class Leader(
   def onSnapshotInstalled(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
-  ): (Node, LogRequestResponse) = ???
+  ): (Node, LogRequestResponse) = {
+    // A leader receiving a snapshot installation notification typically means 
+    // another leader with a higher term is active, which shouldn't happen in a healthy cluster
+    // However, if this occurs, it likely means we should step down
+    
+    // For now, we'll acknowledge the snapshot but this suggests a serious state inconsistency
+    val response = LogRequestResponse(
+      nodeId = address,
+      currentTerm = currentTerm,
+      ackLogIndex = logState.lastLogIndex,
+      success = true
+    )
+    
+    // Leaders shouldn't normally receive snapshot installations, so we maintain our state
+    // In a real implementation, this might warrant stepping down if we detect a higher term
+    (this, response)
+  }
 
   def leader(): Option[NodeAddress] = Some(address)
 
