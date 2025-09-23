@@ -99,14 +99,14 @@ trait Raft[F[_]] {
       case replicateLog: ReplicateLog =>
         background {
           for {
-            response <- logPropagator.propagateLogs(replicateLog.peerId, replicateLog.term, replicateLog.prefixLength)
+            response <- logPropagator.propagateLogs(replicateLog.peerId, replicateLog.term, replicateLog.prefixIndex)
             _        <- onLogRequestResponse(response)
           } yield ()
         }
 
-      case CommitLogs(ackLengthMap) =>
+      case CommitLogs(ackIndexMap) =>
         for {
-          committed <- log.commitLogs(ackLengthMap)
+          committed <- log.commitLogs(ackIndexMap)
           _         <- if (committed) storeState else Monad[F].unit
         } yield ()
 
@@ -127,14 +127,14 @@ trait Raft[F[_]] {
       _                   <- trace"A AppendEntriesRequest received from ${msg.leaderId} with term ${msg.term}"
       logState            <- log.state
       config              <- membershipManager.getClusterConfiguration
-      logPrevSent         <- log.get(msg.prevSentLogLength - 1)
+      logPrevSent         <- log.get(msg.prevSentLogIndex)
       (response, actions) <- modifyState(_.onLogRequest(msg, logState, logPrevSent, config))
       _                   <- updateLastHeartbeat
       _                   <- runActions(actions)
       appended <-
         if (response.success) {
           for {
-            appended <- log.appendEntries(msg.entries, msg.prevSentLogLength, msg.leaderCommit)
+            appended <- log.appendEntries(msg.entries, msg.prevSentLogIndex, msg.leaderCommit)
           } yield appended
         } else
           Monad[F].pure(false)
@@ -277,6 +277,6 @@ trait Raft[F[_]] {
       _        <- trace"Storing the new state in the storage"
       logState <- log.state
       node     <- currentNode
-      _        <- stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.appliedLogLength))
+      _        <- stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.appliedLogIndex))
     } yield ()
 }

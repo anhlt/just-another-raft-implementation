@@ -46,8 +46,8 @@ class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
   override def deleteAfter(index: Long): F[Unit] =
     ref.update(_.filter { case (k, _) => k <= index })
 
-  override def currentLength: F[Long] =
-    ref.get.map(_.size.toLong)
+  override def lastIndex: F[Long] =
+    ref.get.map(entries => if (entries.isEmpty) -1L else entries.keys.max)
 }
 
 class InMemoryStateMachine[F[_]: Sync] extends StateMachine[F] {
@@ -149,9 +149,9 @@ class InMemoryLog[F[_]: Sync] extends Log[F] {
     override def transactional[A](t: => F[A]): F[A] = t
 
     // commit‐index stored in a Ref so we can observe it if we wanted
-    private val commitRef                           = Ref.unsafe[F, Long](0L)
-    override def getCommittedLength: F[Long]       = commitRef.get
-    override def setCommitLength(i: Long): F[Unit] = commitRef.set(i)
+    private val commitRef                           = Ref.unsafe[F, Long](-1L)
+    override def getCommittedIndex: F[Long]        = commitRef.get
+    override def setCommitIndex(i: Long): F[Unit] = commitRef.set(i)
 
     // Not used in these tests
     override def state: F[LogState] = Sync[F].pure(LogState(0, None, 0))
