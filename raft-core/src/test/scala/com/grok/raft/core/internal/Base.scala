@@ -12,8 +12,10 @@ import com.grok.raft.core.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import com.grok.raft.core.protocol.*
-import com.grok.raft.core.storage.PersistedState
+import com.grok.raft.core.storage.SnapshotStorage
+import com.grok.raft.core.storage.Snapshot
 import com.grok.raft.core.storage.StateStorage
+import com.grok.raft.core.storage.PersistedState
 
 object NoOp extends ReadCommand[Unit]
 
@@ -33,7 +35,8 @@ object TestData {
 // 1) An in‐memory LogStorage
 class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
 
-  override def deleteBefore(index: Long): F[Unit] = ???
+  override def deleteBefore(index: Long): F[Unit] =
+    ref.update(_.filter { case (k, _) => k >= index })
 
   private val ref = Ref.unsafe[F, Map[Long, LogEntry]](Map.empty)
 
@@ -50,15 +53,22 @@ class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
     ref.get.map(entries => if (entries.isEmpty) -1L else entries.keys.max)
 }
 
-class InMemoryStateMachine[F[_]: Sync] extends StateMachine[F] {
-  // In‐memory state machine that does nothing
+class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F, T] {
+  private val stateRef = Ref.unsafe[F, T](null.asInstanceOf[T])
+  private val indexRef = Ref.unsafe[F, Long](0L)
 
-  override def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]] = { _ => Sync[F].pure(true) }
+  override def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]] = { 
+    case (index, _) => indexRef.set(index) *> Sync[F].pure(true) 
+  }
 
   override def applyRead: PartialFunction[ReadCommand[?], F[Any]] = { _ => Sync[F].pure(true) }
 
-  override def appliedIndex: F[Long] = Sync[F].pure(0L)
+  override def appliedIndex: F[Long] = indexRef.get
 
+  override def restoreSnapshot[U](lastIndex: Long, data: U): F[Unit] = 
+    stateRef.set(data.asInstanceOf[T]) *> indexRef.set(lastIndex)
+
+  override def getCurrentState: F[T] = stateRef.get
 }
 
 class DummyMembershipManager[F[_]: Sync] extends MembershipManager[F]:
@@ -139,25 +149,26 @@ class DummyLogPropagator[F[_]: Sync] extends LogPropagator[F] {
     Sync[F].pure(LogRequestResponse(peer, term,  prefixLength, success = true))
 }
 
-class InMemoryLog[F[_]: Sync] extends Log[F] {
+class InMemoryLog[F[_]: Sync, T] extends Log[F, T] {
     override val logStorage = new InMemoryLogStorage[F]
-    // these are never called in our tests, so null is okay
+    override val snapshotStorage = new InMemorySnapshotStorage[F, T]
     override val membershipManager = new DummyMembershipManager[F]
-    override val stateMachine      = new InMemoryStateMachine[F]
+    override val stateMachine = new InMemoryStateMachine[F, T]
 
     // identity transaction
     override def transactional[A](t: => F[A]): F[A] = t
 
     // commit‐index stored in a Ref so we can observe it if we wanted
-    private val commitRef                           = Ref.unsafe[F, Long](-1L)
-    override def getCommittedIndex: F[Long]        = commitRef.get
+    private val commitRef = Ref.unsafe[F, Long](-1L)
+    override def getCommittedIndex: F[Long] = commitRef.get
     override def setCommitIndex(i: Long): F[Unit] = commitRef.set(i)
 
     // Not used in these tests
     override def state: F[LogState] = Sync[F].pure(LogState(0, None, 0))
 
-    // Stubs for the methods referenced by appendEntries (not needed here)
-    def compactLogs(): F[Unit] = Sync[F].unit
+    // Allow access to internal methods for testing
+    def getCommittedLength: F[Long] = Sync[F].pure(commitRef.get.asInstanceOf[F[Long]]).flatten
+    def setCommitLength(index: Long): F[Unit] = commitRef.set(index)
 }
 
 class InMemoryStateStorage [F[_]: Sync] extends StateStorage[F] {
@@ -169,4 +180,20 @@ class InMemoryStateStorage [F[_]: Sync] extends StateStorage[F] {
   def retrieveState: F[Option[PersistedState]] = 
 
     ref.get.map(Some(_))
+}
+
+class InMemorySnapshotStorage[F[_]: Sync, T] extends SnapshotStorage[F, T] {
+  private val ref = Ref.unsafe[F, Option[Snapshot[T]]](None)
+
+  override def persistSnapshot(snapshot: Snapshot[T]): F[Unit] = 
+    ref.set(Some(snapshot))
+
+  override def retrieveSnapshot: F[Option[Snapshot[T]]] = 
+    ref.get
+
+  override def getLatestSnapshot: F[Snapshot[T]] = 
+    ref.get.flatMap {
+      case Some(snapshot) => Sync[F].pure(snapshot)
+      case None => Sync[F].raiseError(new RuntimeException("No snapshot available"))
+    }
 }
