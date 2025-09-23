@@ -47,7 +47,7 @@ class FollowerIndexResponseSpec extends FunSuite {
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
-    assertEquals(actions(1), AnnounceLeader(leaderId = addrB, resetPrevious = true))
+    assertEquals(actions(1), AnnounceLeader(leaderId = addrB, resetPrevious = false))
   }
 
   test("Follower.onLogRequest should return correct ackLogIndex with empty entries") {
@@ -95,7 +95,7 @@ class FollowerIndexResponseSpec extends FunSuite {
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
-    assertEquals(actions(1), AnnounceLeader(leaderId = addrB, resetPrevious = true))
+    assertEquals(actions(1), AnnounceLeader(leaderId = addrB, resetPrevious = false))
   }
 
   test("Follower.onLogRequest should return -1 ackLogIndex on term mismatch") {

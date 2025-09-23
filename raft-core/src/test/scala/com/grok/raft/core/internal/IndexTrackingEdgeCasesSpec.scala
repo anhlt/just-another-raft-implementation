@@ -198,7 +198,7 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
 
   test("Log should handle commit progression with gaps in acknowledgments") {
     for {
-      log <- IO(new InMemoryLog[IO])
+      log <- IO(new InMemoryLog[IO, Unit])
       store = log.logStorage
       
       // Pre-populate with entries
