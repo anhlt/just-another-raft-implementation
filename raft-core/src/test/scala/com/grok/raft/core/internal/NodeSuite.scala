@@ -15,8 +15,8 @@ class NodeSuite extends FunSuite {
   val addrB = TestData.addr2
   val addrC = TestData.addr3
 
-  def emptyLogState = LogState(logLength = 0L, lastLogTerm = None, appliedLogIndex = -1L)
-  def smallLogState  = LogState(logLength = 4L, lastLogTerm = Some(2L), appliedLogIndex = 2L)
+  def emptyLogState = LogState(lastLogIndex = -1L, lastLogTerm = None, appliedLogIndex = -1L)
+  def smallLogState  = LogState(lastLogIndex = 3L, lastLogTerm = Some(2L), appliedLogIndex = 2L)
 
   // Create a “dummy” follower to pass into ClusterConfiguration
   private val dummyFollower = Follower(address = addrA, currentTerm = 0L)
