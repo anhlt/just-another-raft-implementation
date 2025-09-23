@@ -223,7 +223,7 @@ case class Follower(
           LogRequestResponse(
             address,
             currentTerm,
-            logState.logLength,
+            logState.lastLogIndex,
             false
           ),
           List.empty[Action]
@@ -249,7 +249,7 @@ case class Follower(
           List(
             AnnounceLeader(
               leaderId = leaderId,
-              resetPrevious = !currentLeader.isEmpty // reset previous leader info if it exists
+               resetPrevious = true // reset when leader changes
             )
           )
         else List.empty[Action]
@@ -268,7 +268,7 @@ case class Follower(
             LogRequestResponse(
               address,
               leaderTerm,
-              prevSentLogIndex + 1 + logRequest.entries.length,
+               prevSentLogIndex + logRequest.entries.length,
               true
             ),
             actions
@@ -282,7 +282,7 @@ case class Follower(
             LogRequestResponse(
               address,
               leaderTerm,
-              0, // TODO: verify
+              -1, // TODO: verify
               false
             ),
             actions
@@ -462,7 +462,7 @@ case class Candidate(
           LogRequestResponse(
             address,
             currentTerm,
-            logState.logLength,
+            logState.lastLogIndex,
             false
           ),
           List.empty[Action]
@@ -491,7 +491,7 @@ case class Candidate(
             LogRequestResponse(
               address,
               leaderTerm,
-              prevSentLogIndex + 1 + logRequest.entries.length,
+               prevSentLogIndex + logRequest.entries.length,
               true
             ),
             actions
@@ -505,7 +505,7 @@ case class Candidate(
             LogRequestResponse(
               address,
               leaderTerm,
-              0, // TODO: verify
+              -1, // TODO: verify
               false
             ),
             actions
@@ -634,7 +634,7 @@ case class Leader(
     // Check if candidate’s log is at least as up-to-date as leader’s log (§5.4)
     val logOk =
       (candidateLastLogTerm > lastLogTerm) ||
-        (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= (logState.logLength - 1))
+        (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= logState.lastLogIndex)
 
     val termOk = candidateTerm > currentTerm
 
@@ -682,7 +682,7 @@ case class Leader(
 
     if (logRequest.term < currentTerm) {
       // RPC term is stale: reject replication request
-      val response = LogRequestResponse(address, currentTerm, logState.logLength, success = false)
+      val response = LogRequestResponse(address, currentTerm, logState.lastLogIndex, success = false)
       (this, (response, List.empty))
     } else {
       // Higher or equal term from another leader or candidate: step down to follower
@@ -710,13 +710,13 @@ case class Leader(
         val response = LogRequestResponse(
           address,
           logRequest.term,
-          logRequest.prevSentLogIndex + 1 + logRequest.entries.length,
+          logRequest.prevSentLogIndex + logRequest.entries.length,
           success = true
         )
         (nextState, (response, actions))
       } else {
         // Log inconsistency: reject entries
-        val response = LogRequestResponse(address, logRequest.term, 0, success = false)
+        val response = LogRequestResponse(address, logRequest.term, -1, success = false)
         (nextState, (response, actions))
       }
     }
@@ -766,7 +766,7 @@ case class Leader(
       msg: LogRequestResponse
   ): (Node, List[Action]) = {
 
-    val LogRequestResponse(fromNodeId, messageTerm, ackLogLength, success) = msg
+    val LogRequestResponse(fromNodeId, messageTerm, ackLogIndex, success) = msg
 
     if (messageTerm > currentTerm) {
       // Step down if follower reports higher term to maintain Election Safety (§5.2)
@@ -776,7 +776,6 @@ case class Leader(
     } else {
       if (success) {
         // Replication succeeded: update sent and ack maps with follower's ack index
-        val ackLogIndex = ackLogLength - 1 // convert length to index
         val newSentIndexMap = sentIndexMap + (fromNodeId -> ackLogIndex)
         val newAckIndexMap  = ackIndexMap + (fromNodeId  -> ackLogIndex)
 
