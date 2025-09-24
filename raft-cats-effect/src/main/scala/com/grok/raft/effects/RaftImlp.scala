@@ -12,7 +12,7 @@ import com.grok.raft.core.*
 import com.grok.raft.core.storage.*
 import com.grok.raft.core.internal.*
 
-class RaftImlp[F[_]: {Sync, Temporal}, T](
+class RaftImlp[F[_]: Async, T](
     val config: ClusterConfiguration,
     val leaderAnnouncer: LeaderAnnouncer[F],
     val membershipManager: MembershipManager[F],
@@ -26,20 +26,18 @@ class RaftImlp[F[_]: {Sync, Temporal}, T](
 ) extends Raft[F, T]:
 
   override def deferred[A]: F[RaftDeferred[F, A]] = 
-    for {
-      catsDeferred <- Deferred[F, A]
-    } yield new DeferredImpl[F, A](catsDeferred)
+    Deferred[F, A].map(new DeferredImpl[F, A](_))
 
   // Remove the override since storeState is already implemented in the trait
   // override def storeState(using Monad[F], Logger[F]): F[Unit] = ???
 
   override def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit] = 
-    Temporal[F].start(fa) *> Monad[F].unit
+    Async[F].start(fa) *> Monad[F].unit
 
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = 
     for {
       lastHeartbeat <- lastHeartbeatRef.get
-      currentTime <- Temporal[F].monotonic
+      currentTime <- Async[F].monotonic
       elapsed = currentTime.toMillis - lastHeartbeat
       node <- currentNode
     } yield elapsed < config.heartbeatTimeoutMillis || node.isInstanceOf[Leader]
@@ -53,7 +51,7 @@ class RaftImlp[F[_]: {Sync, Temporal}, T](
   override def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit] = {
     for  {
       _ <- trace"Updating last heartbeat"
-      currentTime <- Temporal[F].monotonic
+      currentTime <- Async[F].monotonic
       _ <- lastHeartbeatRef.set(currentTime.toMillis)
     } yield ()
 
@@ -65,16 +63,16 @@ class RaftImlp[F[_]: {Sync, Temporal}, T](
 
   override def delayElection()(using Monad[F]): F[Unit] = 
     for {
-      millis <- Sync[F].delay(config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis))
-      delayTimes <- Sync[F].delay(millis.milliseconds)
-      _ <- Temporal[F].sleep(delayTimes)
+      millis <- Async[F].delay(config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis))
+      delayTimes <- Async[F].delay(millis.milliseconds)
+      _ <- Async[F].sleep(delayTimes)
     } yield ()
 
   override def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit] =
     Monad[F]
       .foreverM({
         for {
-          _ <- Temporal[F].sleep(delay)
+          _ <- Async[F].sleep(delay)
           _ <- fa
         } yield ()
       })

@@ -27,23 +27,20 @@ trait Log[F[_], T]:
 
   val stateMachine: StateMachine[F, T]
 
-
   def initialize(using
       MonadThrow[F],
       Logger[F]
   ): F[Unit] =
     for {
-      snapshot <- snapshotStorage.retrieveSnapshot
-      _ <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
-      committedIndex <- getCommittedIndex
+      snapshot          <- snapshotStorage.retrieveSnapshot
+      _                 <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
+      committedIndex    <- getCommittedIndex
       stateMachineIndex <- stateMachine.appliedIndex
       _ <- {
         if (stateMachineIndex > committedIndex) setCommitIndex(stateMachineIndex)
         else (stateMachineIndex to committedIndex).toList.traverse(commitLog).void
-      } 
+      }
     } yield ()
-
-
 
   /** Methods to access and modify the commit index. The commit index represents the highest log entry known to be
     * committed in the Raft consensus.
@@ -139,7 +136,7 @@ trait Log[F[_], T]:
   def putEntries(entries: List[LogEntry], leaderPrevLogIndex: Long, currentLogIndex: Long)(using
       Monad[F],
       Logger[F]
-  ): F[Unit] = 
+  ): F[Unit] =
     val logEntries = if (leaderPrevLogIndex + entries.size > currentLogIndex) {
       entries.drop((currentLogIndex - leaderPrevLogIndex).toInt)
     } else List.empty[LogEntry]
@@ -147,9 +144,6 @@ trait Log[F[_], T]:
     logEntries.traverse { entry =>
       logStorage.put(entry.index, entry) *> trace"Entry appended: ${entry}"
     }.void
-  
-
-
 
   /** Appends new log entries received from the leader, ensuring log consistency and handling commitment. This method
     * implements the AppendEntries RPC mechanism from the Raft consensus algorithm, which is used to replicate log
@@ -181,17 +175,20 @@ trait Log[F[_], T]:
   ): F[Boolean] =
     transactional {
       for {
-        currentLogIndex  <- logStorage.lastIndex
-        appliedIndex     <- getCommittedIndex
-        _                <- truncateInconsistencyLog(entries, leaderPrevLogIndex, currentLogIndex)
-        _                <- putEntries(entries, leaderPrevLogIndex, currentLogIndex)
-        committed        <- ((appliedIndex + 1) to leaderCommit).toList.traverse(length => commitLog(length - 1))
+        currentLogIndex <- logStorage.lastIndex
+        appliedIndex    <- getCommittedIndex
+        _               <- truncateInconsistencyLog(entries, leaderPrevLogIndex, currentLogIndex)
+        _               <- putEntries(entries, leaderPrevLogIndex, currentLogIndex)
+        committed       <- ((appliedIndex + 1) to leaderCommit).toList.traverse(length => commitLog(length - 1))
 
         _ <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
       } yield committed.nonEmpty
     }
 
-  def append[T](term: Long, command: Command[T], deferred: RaftDeferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
+  def append[T](term: Long, command: Command[T], deferred: RaftDeferred[F, T])(using
+      MonadThrow[F],
+      Logger[F]
+  ): F[LogEntry] =
     transactional {
       for {
         lastIndex <- logStorage.lastIndex
@@ -218,13 +215,13 @@ trait Log[F[_], T]:
     */
   def commitLogs(ackIndexMap: Map[NodeAddress, Long])(using MonadThrow[F], Logger[F]): F[Boolean] = {
     for {
-      lastLogIndex   <- logStorage.lastIndex
-      commitedIndex  <- getCommittedIndex
-      _              <- trace"Last log index: $lastLogIndex, Committed index: $commitedIndex"
-      _              <- trace"Received ackIndexMap: $ackIndexMap"
-      _              <- trace"Checking for quorum"
-      commited       <- ((commitedIndex + 1) to lastLogIndex).toList.traverse(index => commitIfMatch(ackIndexMap, index))
-      _              <- trace"all log commited"
+      lastLogIndex  <- logStorage.lastIndex
+      commitedIndex <- getCommittedIndex
+      _             <- trace"Last log index: $lastLogIndex, Committed index: $commitedIndex"
+      _             <- trace"Received ackIndexMap: $ackIndexMap"
+      _             <- trace"Checking for quorum"
+      commited      <- ((commitedIndex + 1) to lastLogIndex).toList.traverse(index => commitIfMatch(ackIndexMap, index))
+      _             <- trace"all log commited"
     } yield commited.contains(true) || commited.isEmpty
   }
 
@@ -245,16 +242,16 @@ trait Log[F[_], T]:
       Logger[F]
   ): F[Unit] = {
     for {
-      _ <- trace"Attempting to commit log entry at index: ${index}"
+      _        <- trace"Attempting to commit log entry at index: ${index}"
       logEntry <- logStorage.get(index)
-      _        <- logEntry match {
+      _ <- logEntry match {
         case Some(entry) => Monad[F].pure(entry)
         case None        => MonadThrow[F].raiseError(LogError("Log entry not found for commit."))
       }
-      _        <- trace"Committing log entry: ${logEntry}"
-      _        <- applyCommand(logEntry.get.index, logEntry.get.command)
-      _        <- setCommitIndex(logEntry.get.index)
-      _        <- trace"Log entry committed: ${logEntry}"
+      _ <- trace"Committing log entry: ${logEntry}"
+      _ <- applyCommand(logEntry.get.index, logEntry.get.command)
+      _ <- setCommitIndex(logEntry.get.index)
+      _ <- trace"Log entry committed: ${logEntry}"
     } yield ()
   }
 
@@ -281,24 +278,25 @@ trait Log[F[_], T]:
 
   def compactLogs()(using MonadThrow[F], Logger[F]): F[Unit] = {
     for {
-      appliedIndex <- stateMachine.appliedIndex
+      appliedIndex  <- stateMachine.appliedIndex
       shouldCompact <- shouldCreateSnapshot()
-      _ <- trace"Starting log compaction up to applied index: $appliedIndex, should compact: $shouldCompact"
-      _ <- if (appliedIndex > 0 && shouldCompact) {
-        for {
-          snapshot <- createSnapshot(appliedIndex)
-          _ <- logStorage.deleteBefore(appliedIndex)
-          _ <- trace"Log entries before index $appliedIndex have been compacted"
-        } yield ()
-      } else Monad[F].unit
+      _             <- trace"Starting log compaction up to applied index: $appliedIndex, should compact: $shouldCompact"
+      _ <-
+        if (appliedIndex > 0 && shouldCompact) {
+          for {
+            snapshot <- createSnapshot(appliedIndex)
+            _        <- logStorage.deleteBefore(appliedIndex)
+            _        <- trace"Log entries before index $appliedIndex have been compacted"
+          } yield ()
+        } else Monad[F].unit
     } yield ()
   }
 
   def createSnapshot(lastIndex: Long)(using MonadThrow[F], Logger[F]): F[Snapshot[T]] = {
     for {
-      _ <- trace"Creating snapshot up to index: $lastIndex"
+      _            <- trace"Creating snapshot up to index: $lastIndex"
       currentState <- stateMachine.getCurrentState
-      config <- membershipManager.getClusterConfiguration
+      config       <- membershipManager.getClusterConfiguration
       snapshot = Snapshot(lastIndex, currentState, config)
       _ <- snapshotStorage.persistSnapshot(snapshot)
       _ <- trace"Snapshot created and persisted for index: $lastIndex"
@@ -332,12 +330,12 @@ trait Log[F[_], T]:
     for {
       snapshot <- snapshotStorage.retrieveSnapshot
     } yield snapshot.map(s => (s.lastIndex, s.config))
-  } 
+  }
 
   def restoreSnapshot[T](snapshot: Snapshot[T])(using
       Monad[F],
       Logger[F]
-  ): F[Unit] = 
+  ): F[Unit] =
     for {
       _ <- trace"Restoring snapshot with last index: ${snapshot.lastIndex}"
       _ <- membershipManager.setClusterConfiguration(snapshot.config)

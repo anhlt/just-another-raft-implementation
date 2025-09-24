@@ -1,7 +1,6 @@
 package com.grok.raft.core.error
 
-sealed abstract class BaseError(message: String)
-  extends Exception(message)
+sealed abstract class BaseError(message: String) extends Exception(message)
 
 case class RaftError(val message: String) extends BaseError(message) {
   override def toString: String = s"RaftError: $message"

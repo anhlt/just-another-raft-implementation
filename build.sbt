@@ -27,8 +27,7 @@ val commonSettings = Seq(
     Dependencies.scalaCheck.value,
     Dependencies.munitScalaCheck.value,
     Dependencies.munitScalaCheckEffect.value,
-    Dependencies.scalaCheckEffect.value,
-    Dependencies.rocksdbJni.value
+    Dependencies.scalaCheckEffect.value
   )
 )
 
@@ -48,7 +47,8 @@ val raft = (project in file("raft-core"))
 val raftCatsEffect = (project in file("raft-cats-effect"))
   .settings(
     name := "raft-cats-effect",
-    commonSettings
+    commonSettings,
+    libraryDependencies += Dependencies.rocksdbJni.value
   )
   .dependsOn(raft)
 

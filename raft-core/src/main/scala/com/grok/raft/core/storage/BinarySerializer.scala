@@ -1,7 +1,21 @@
 package com.grok.raft.core.storage
 
 import java.nio.ByteBuffer
-import com.grok.raft.core.protocol.{Command, ReadCommand, WriteCommand, WriteOp, ReadOp, Create, Update, Delete, Upsert, Get, Scan, Range, Keys}
+import com.grok.raft.core.protocol.{
+  Command,
+  ReadCommand,
+  WriteCommand,
+  WriteOp,
+  ReadOp,
+  Create,
+  Update,
+  Delete,
+  Upsert,
+  Get,
+  Scan,
+  Range,
+  Keys
+}
 import com.grok.raft.core.internal.LogEntry
 
 object BinarySerializer {
@@ -10,13 +24,13 @@ object BinarySerializer {
     val buffer = ByteBuffer.allocate(1024)
     buffer.putLong(entry.term)
     buffer.putLong(entry.index)
-    
+
     entry.command match {
       case writeOp: WriteOp[_, _] =>
         buffer.put(1.toByte) // WriteOp marker
         serializeWriteOp(writeOp, buffer)
       case readOp: ReadOp[_, _] =>
-        buffer.put(2.toByte) // ReadOp marker  
+        buffer.put(2.toByte) // ReadOp marker
         serializeReadOp(readOp, buffer)
       case other =>
         buffer.put(0.toByte) // Other command marker
@@ -24,7 +38,7 @@ object BinarySerializer {
         buffer.putInt(serialized.length)
         buffer.put(serialized)
     }
-    
+
     val result = new Array[Byte](buffer.position())
     buffer.flip()
     buffer.get(result)
@@ -32,22 +46,22 @@ object BinarySerializer {
   }
 
   def deserializeLogEntry(bytes: Array[Byte]): LogEntry = {
-    val buffer = ByteBuffer.wrap(bytes)
-    val term = buffer.getLong()
-    val index = buffer.getLong()
+    val buffer      = ByteBuffer.wrap(bytes)
+    val term        = buffer.getLong()
+    val index       = buffer.getLong()
     val commandType = buffer.get()
-    
+
     val command: Command[?] = commandType match {
       case 1 => deserializeWriteOp(buffer)
       case 2 => deserializeReadOp(buffer)
       case _ =>
-        val length = buffer.getInt()
+        val length       = buffer.getInt()
         val commandBytes = new Array[Byte](length)
         buffer.get(commandBytes)
         // For unknown commands, return a simple Get operation as fallback
         Get(new String(commandBytes, "UTF-8"))
     }
-    
+
     LogEntry(term, index, command)
   }
 
@@ -119,15 +133,15 @@ object BinarySerializer {
         Get(key)
       case 2 =>
         val startKey = deserializeKey(buffer)
-        val limit = buffer.getInt()
+        val limit    = buffer.getInt()
         Scan(startKey, limit)
       case 3 =>
         val startKey = deserializeKey(buffer)
-        val endKey = deserializeKey(buffer)
+        val endKey   = deserializeKey(buffer)
         Range(startKey, endKey)
       case 4 =>
         val hasPrefix = buffer.get()
-        val prefix = if (hasPrefix == 1) Some(deserializeKey(buffer)) else None
+        val prefix    = if (hasPrefix == 1) Some(deserializeKey(buffer)) else None
         Keys(prefix)
     }
   }
@@ -147,15 +161,15 @@ object BinarySerializer {
 
   private def deserializeKey(buffer: ByteBuffer): String = {
     val keyLength = buffer.getInt()
-    val keyBytes = new Array[Byte](keyLength)
+    val keyBytes  = new Array[Byte](keyLength)
     buffer.get(keyBytes)
     new String(keyBytes, "UTF-8")
   }
 
   private def deserializeKeyValue(buffer: ByteBuffer): (String, String) = {
-    val key = deserializeKey(buffer)
+    val key         = deserializeKey(buffer)
     val valueLength = buffer.getInt()
-    val valueBytes = new Array[Byte](valueLength)
+    val valueBytes  = new Array[Byte](valueLength)
     buffer.get(valueBytes)
     val value = new String(valueBytes, "UTF-8")
     (key, value)

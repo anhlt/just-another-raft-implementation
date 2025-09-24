@@ -13,4 +13,9 @@ import com.grok.raft.core.internal.NodeAddress
   * @param lastLogTerm
   *   the term of the last log entry
   */
-case class VoteRequest(proposedLeaderAddress: NodeAddress, candidateTerm: Long, candidateLogIndex: Long, candidateLastLogTerm: Long)
+case class VoteRequest(
+    proposedLeaderAddress: NodeAddress,
+    candidateTerm: Long,
+    candidateLogIndex: Long,
+    candidateLastLogTerm: Long
+)

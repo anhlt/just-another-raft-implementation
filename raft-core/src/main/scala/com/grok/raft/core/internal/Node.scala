@@ -95,8 +95,7 @@ sealed trait Node {
       msg: LogRequestResponse
   ): (Node, List[Action])
 
-  /** This method is called when a log entry is replicated to the followers
-    * No ops on Candidate and Follower nodes
+  /** This method is called when a log entry is replicated to the followers No ops on Candidate and Follower nodes
     * @param configCluster
     * @return
     */
@@ -233,7 +232,6 @@ case class Follower(
       val nextState =
         this.copy(currentTerm = leaderTerm, currentLeader = Some(leaderId))
 
-
       // When stepping down to follower due to a higher term leader (leaderId),
       // we must inform the system about the new leader and reset any previous leadership state.
       // This prevents the system from holding stale leadership information which could cause conflicts or stale reads.
@@ -268,7 +266,7 @@ case class Follower(
             LogRequestResponse(
               address,
               leaderTerm,
-               prevSentLogIndex + logRequest.entries.length,
+              prevSentLogIndex + logRequest.entries.length,
               true
             ),
             actions
@@ -308,21 +306,21 @@ case class Follower(
     // For a follower, snapshot installation represents successful synchronization with the leader
     // The snapshot has been installed by the Log layer, so we just need to respond positively
     // and potentially update our leader information
-    
+
     val response = LogRequestResponse(
       nodeId = address,
       currentTerm = currentTerm,
       ackLogIndex = logState.lastLogIndex, // Acknowledge up to the snapshot's last index
       success = true
     )
-    
+
     // Return the current follower state and positive response
     (this, response)
   }
 
   def leader(): Option[NodeAddress] = currentLeader
 
-  def toPersistedState: PersistedState = PersistedState(term = currentTerm , votedFor = votedFor)
+  def toPersistedState: PersistedState = PersistedState(term = currentTerm, votedFor = votedFor)
 
 }
 
@@ -387,7 +385,7 @@ case class Candidate(
     (logOk && termOk) match
       case true =>
         (
-          Follower(address, candidateTerm, Some(proposedLeaderAddress), votedFor=Some(proposedLeaderAddress)),
+          Follower(address, candidateTerm, Some(proposedLeaderAddress), votedFor = Some(proposedLeaderAddress)),
           (
             VoteResponse(address, candidateTerm, logOk && termOk),
             List(StoreState)
@@ -432,7 +430,6 @@ case class Candidate(
         .map(node => (node, -1L)) // -1 means no entries acknowledged yet
         .toMap
       val actions = clusterConfiguration.members.filter(_ != address).map(n => ReplicateLog(n, currentTerm, logIndex))
-
 
       (
         Leader(address, currentTerm, sentIndexMap, ackedIndexMap),
@@ -505,7 +502,7 @@ case class Candidate(
             LogRequestResponse(
               address,
               leaderTerm,
-               prevSentLogIndex + logRequest.entries.length,
+              prevSentLogIndex + logRequest.entries.length,
               true
             ),
             actions
@@ -546,14 +543,14 @@ case class Candidate(
     // A candidate that receives a snapshot installation should step down to follower
     // This indicates there's a legitimate leader sending snapshots
     // We accept the snapshot and become a follower
-    
+
     val response = LogRequestResponse(
       nodeId = address,
       currentTerm = currentTerm,
       ackLogIndex = logState.lastLogIndex, // Acknowledge up to the snapshot's last index
       success = true
     )
-    
+
     // Step down to follower - snapshot installation implies there's a leader
     val newFollower = Follower(
       address = address,
@@ -561,13 +558,13 @@ case class Candidate(
       currentLeader = None, // Will be set when we receive the next log request from leader
       votedFor = votedFor
     )
-    
+
     (newFollower, response)
   }
 
   def leader(): Option[NodeAddress] = None
 
-  def toPersistedState: PersistedState = PersistedState(term = currentTerm , votedFor = votedFor)
+  def toPersistedState: PersistedState = PersistedState(term = currentTerm, votedFor = votedFor)
 
 }
 
@@ -681,11 +678,11 @@ case class Leader(
       (newState, (response, actions))
     } else {
       // Reject vote but update replication progress for candidate to help log sync
-      val candidateLastIndex = candidateLogIndex // convert length to index
+      val candidateLastIndex  = candidateLogIndex // convert length to index
       val updatedSentIndexMap = this.sentIndexMap + (candidateAddress -> candidateLastIndex)
       val updatedAckIndexMap  = this.ackIndexMap + (candidateAddress  -> candidateLastIndex)
-      val newState             = this.copy(sentIndexMap = updatedSentIndexMap, ackIndexMap = updatedAckIndexMap)
-      val response             = VoteResponse(address, currentTerm, false)
+      val newState            = this.copy(sentIndexMap = updatedSentIndexMap, ackIndexMap = updatedAckIndexMap)
+      val response            = VoteResponse(address, currentTerm, false)
       // Trigger replication to help candidate catch up
       val actions = List(ReplicateLog(candidateAddress, currentTerm, candidateLastIndex))
       (newState, (response, actions))
@@ -769,8 +766,7 @@ case class Leader(
     *      - Updates the sent and acknowledged log indices (equivalent to `nextIndex` and `matchIndex` in the Raft paper
     *        Figure 2).
     *      - Triggers commit of log entries that have been replicated on a majority, upholding Leader Completeness
-    *        (§5.4.3).
-    *      3. On failure (usually due to log inconsistencies):
+    *        (§5.4.3). 3. On failure (usually due to log inconsistencies):
     *      - Decreases the sent index for the follower (`nextIndex`) to retry replication with earlier log entries,
     *        implementing Raft’s backtracking mechanism to resolve conflicts (§5.3).
     *      - Initiates a new replication action with the updated prefixLength.
@@ -848,10 +844,10 @@ case class Leader(
       logState: LogState,
       clusterConfiguration: ClusterConfiguration
   ): (Node, LogRequestResponse) = {
-    // A leader receiving a snapshot installation notification typically means 
+    // A leader receiving a snapshot installation notification typically means
     // another leader with a higher term is active, which shouldn't happen in a healthy cluster
     // However, if this occurs, it likely means we should step down
-    
+
     // For now, we'll acknowledge the snapshot but this suggests a serious state inconsistency
     val response = LogRequestResponse(
       nodeId = address,
@@ -859,7 +855,7 @@ case class Leader(
       ackLogIndex = logState.lastLogIndex,
       success = true
     )
-    
+
     // Leaders shouldn't normally receive snapshot installations, so we maintain our state
     // In a real implementation, this might warrant stepping down if we detect a higher term
     (this, response)
@@ -867,6 +863,6 @@ case class Leader(
 
   def leader(): Option[NodeAddress] = Some(address)
 
-  def toPersistedState: PersistedState = PersistedState(term = currentTerm , votedFor = Some(address))
+  def toPersistedState: PersistedState = PersistedState(term = currentTerm, votedFor = Some(address))
 
 }
