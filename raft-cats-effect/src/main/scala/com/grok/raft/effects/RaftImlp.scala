@@ -1,6 +1,7 @@
 package com.grok.raft.effects
 
 import com.grok.raft.core.Raft
+import com.grok.raft.effects.internal.DeferredImpl
 import cats._
 import cats.effect._
 import cats.implicits._
@@ -24,12 +25,16 @@ class RaftImlp[F[_]: {Sync, Temporal}, T](
     lastHeartbeatRef: Ref[F, Long],
 ) extends Raft[F, T]:
 
+  override def deferred[A]: F[RaftDeferred[F, A]] = 
+    for {
+      catsDeferred <- Deferred[F, A]
+    } yield new DeferredImpl[F, A](catsDeferred)
 
-  override def deferred[A]: F[RaftDeferred[F, A]] = ???
+  // Remove the override since storeState is already implemented in the trait
+  // override def storeState(using Monad[F], Logger[F]): F[Unit] = ???
 
-  override def storeState(using Monad[F], Logger[F]): F[Unit] = ???
-
-  override def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit] = ???
+  override def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit] = 
+    Temporal[F].start(fa) *> Monad[F].unit
 
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = 
     for {
@@ -54,21 +59,18 @@ class RaftImlp[F[_]: {Sync, Temporal}, T](
 
   }
 
-  def setCurrentNode(node: Node): F[Unit] = currentStateRef.set(node)
+  override def setCurrentNode(node: Node): F[Unit] = currentStateRef.set(node)
 
-  def currentNode: F[Node] = currentStateRef.get
+  override def currentNode: F[Node] = currentStateRef.get
 
-  def delayElection()(using Monad[F]): F[Unit] = 
+  override def delayElection()(using Monad[F]): F[Unit] = 
     for {
       millis <- Sync[F].delay(config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis))
       delayTimes <- Sync[F].delay(millis.milliseconds)
       _ <- Temporal[F].sleep(delayTimes)
     } yield ()
 
-
-  def background[A](fa: => F[A])(using Monad[F]): F[Unit] = Temporal[F].start(fa) *> Monad[F].unit
-
-  def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit] =
+  override def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit] =
     Monad[F]
       .foreverM({
         for {

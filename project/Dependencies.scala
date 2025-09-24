@@ -21,5 +21,5 @@ object Dependencies {
     "org.typelevel" %% "scalacheck-effect-munit" % "2.0.0-M2" % Test
   )
 
-  val rocksdbJni = Def.setting("org.rocksdb" % "rocksdbjni" % "9.13.1")
+  val rocksdbJni = Def.setting("org.rocksdb" % "rocksdbjni" % "8.11.3")
 }

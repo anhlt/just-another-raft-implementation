@@ -76,7 +76,7 @@ object RocksDBWrapper {
         .setCreateIfMissing(true)
         .setCreateMissingColumnFamilies(true)
         .setMaxBackgroundJobs(4)
-        .setWriteBufferSize(64 * 1024 * 1024)
+        .setDbWriteBufferSize(64 * 1024 * 1024)
       
       val cfOptions = new ColumnFamilyOptions()
         .setCompressionType(CompressionType.LZ4_COMPRESSION)

@@ -1,12 +1,12 @@
 package com.grok.raft.core.storage
 
 import java.nio.ByteBuffer
-import com.grok.raft.core.protocol.{WriteOp, ReadOp, Create, Update, Delete, Upsert, Get, Scan, Range, Keys}
+import com.grok.raft.core.protocol.{Command, ReadCommand, WriteCommand, WriteOp, ReadOp, Create, Update, Delete, Upsert, Get, Scan, Range, Keys}
 import com.grok.raft.core.internal.LogEntry
 
 object BinarySerializer {
 
-  def serializeLogEntry[T](entry: LogEntry[T]): Array[Byte] = {
+  def serializeLogEntry(entry: LogEntry): Array[Byte] = {
     val buffer = ByteBuffer.allocate(1024)
     buffer.putLong(entry.term)
     buffer.putLong(entry.index)
@@ -31,23 +31,24 @@ object BinarySerializer {
     result
   }
 
-  def deserializeLogEntry[T](bytes: Array[Byte]): LogEntry[T] = {
+  def deserializeLogEntry(bytes: Array[Byte]): LogEntry = {
     val buffer = ByteBuffer.wrap(bytes)
     val term = buffer.getLong()
     val index = buffer.getLong()
     val commandType = buffer.get()
     
-    val command = commandType match {
+    val command: Command[?] = commandType match {
       case 1 => deserializeWriteOp(buffer)
       case 2 => deserializeReadOp(buffer)
       case _ =>
         val length = buffer.getInt()
         val commandBytes = new Array[Byte](length)
         buffer.get(commandBytes)
-        new String(commandBytes, "UTF-8")
+        // For unknown commands, return a simple Get operation as fallback
+        Get(new String(commandBytes, "UTF-8"))
     }
     
-    LogEntry(term, index, command.asInstanceOf[T], None)
+    LogEntry(term, index, command)
   }
 
   private def serializeWriteOp[K, V](writeOp: WriteOp[K, V], buffer: ByteBuffer): Unit = {
@@ -93,7 +94,7 @@ object BinarySerializer {
       case Scan(startKey, limit) =>
         buffer.put(2.toByte)
         serializeKey(startKey, buffer)
-        buffer.putInt(limit)
+        buffer.putInt(limit): Unit
       case Range(startKey, endKey) =>
         buffer.put(3.toByte)
         serializeKey(startKey, buffer)
@@ -105,7 +106,7 @@ object BinarySerializer {
             buffer.put(1.toByte)
             serializeKey(p, buffer)
           case None =>
-            buffer.put(0.toByte)
+            buffer.put(0.toByte): Unit
         }
     }
   }
@@ -134,14 +135,14 @@ object BinarySerializer {
   private def serializeKey[K](key: K, buffer: ByteBuffer): Unit = {
     val keyBytes = key.toString.getBytes("UTF-8")
     buffer.putInt(keyBytes.length)
-    buffer.put(keyBytes)
+    buffer.put(keyBytes): Unit
   }
 
   private def serializeKeyValue[K, V](key: K, value: V, buffer: ByteBuffer): Unit = {
     serializeKey(key, buffer)
     val valueBytes = value.toString.getBytes("UTF-8")
     buffer.putInt(valueBytes.length)
-    buffer.put(valueBytes)
+    buffer.put(valueBytes): Unit
   }
 
   private def deserializeKey(buffer: ByteBuffer): String = {
