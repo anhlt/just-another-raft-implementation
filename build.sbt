@@ -27,7 +27,8 @@ val commonSettings = Seq(
     Dependencies.scalaCheck.value,
     Dependencies.munitScalaCheck.value,
     Dependencies.munitScalaCheckEffect.value,
-    Dependencies.scalaCheckEffect.value
+    Dependencies.scalaCheckEffect.value,
+    Dependencies.rocksdbJni.value
   )
 )
 
