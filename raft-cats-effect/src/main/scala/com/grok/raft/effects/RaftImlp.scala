@@ -12,18 +12,18 @@ import com.grok.raft.core.*
 import com.grok.raft.core.storage.*
 import com.grok.raft.core.internal.*
 
-class RaftImlp[F[_]: Async, T](
+class RaftImlp[F[_]: Async, T, W](
     val config: ClusterConfiguration,
     val leaderAnnouncer: LeaderAnnouncer[F],
     val membershipManager: MembershipManager[F],
-    val log: Log[F, T],
+    val log: Log[F, T, W],
     val rpcClient: RpcClient[F],
     val logPropagator: LogPropagator[F],
     val stateStorage: StateStorage[F],
     currentStateRef: Ref[F, Node],
     isRunning: Ref[F, Boolean],
     lastHeartbeatRef: Ref[F, Long],
-) extends Raft[F, T]:
+) extends Raft[F, T, W]:
 
   override def deferred[A]: F[RaftDeferred[F, A]] = 
     Deferred[F, A].map(new DeferredImpl[F, A](_))

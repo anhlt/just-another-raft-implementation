@@ -14,10 +14,10 @@ class TestRaft[F[_]: Async, T](
     override val leaderAnnouncer: LeaderAnnouncer[F],
     override val membershipManager: MembershipManager[F],
     override val logPropagator: LogPropagator[F],
-    override val log: Log[F, T],
+    override val log: Log[F],
     override val stateStorage: StateStorage[F],
     override val rpcClient: RpcClient[F]
-) extends Raft[F, T] {
+) extends Raft[F] {
 
   override def deferred[A]: F[RaftDeferred[F, A]] = {
 
@@ -48,8 +48,8 @@ class TestRaft[F[_]: Async, T](
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = Monad[F].pure(false)
 
   // No‐ops for scheduling/heartbeats
-  def scheduleElection()(using Monad[F], Logger[F]): F[Unit]    = Monad[F].unit
-  def scheduleReplication()(using Monad[F], Logger[F]): F[Unit] = Monad[F].unit
+  def scheduleElection()(using Monad[F]): F[Unit]    = Monad[F].unit
+  def scheduleReplication()(using Monad[F]): F[Unit] = Monad[F].unit
   def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit]   = Monad[F].unit
 }
 

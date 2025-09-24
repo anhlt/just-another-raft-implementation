@@ -52,22 +52,22 @@ class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
     ref.get.map(entries => if (entries.isEmpty) -1L else entries.keys.max)
 }
 
-class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F, T] {
+class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F] {
   private val stateRef = Ref.unsafe[F, T](null.asInstanceOf[T])
   private val indexRef = Ref.unsafe[F, Long](0L)
 
-  override def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]] = { case (index, _) =>
-    indexRef.set(index) *> Sync[F].pure(true)
+  override def applyWrite: PartialFunction[(Long, WriteCommand[Option[Array[Byte]]]), F[Option[Array[Byte]]]] = { case (index, _) =>
+    indexRef.set(index) *> Sync[F].pure(Some("test".getBytes("UTF-8")))
   }
 
-  override def applyRead: PartialFunction[ReadCommand[?], F[Any]] = { _ => Sync[F].pure(true) }
+  override def applyRead[A]: PartialFunction[ReadCommand[A], F[A]] = { _ => Sync[F].pure(Some("test".getBytes("UTF-8")).asInstanceOf[A]) }
 
   override def appliedIndex: F[Long] = indexRef.get
 
-  override def restoreSnapshot[U](lastIndex: Long, data: U): F[Unit] =
-    stateRef.set(data.asInstanceOf[T]) *> indexRef.set(lastIndex)
+  override def restoreSnapshot(lastIndex: Long, data: Array[Byte]): F[Unit] =
+    indexRef.set(lastIndex)
 
-  override def getCurrentState: F[T] = stateRef.get
+  override def getCurrentState: F[Array[Byte]] = Sync[F].pure("test".getBytes("UTF-8"))
 }
 
 class DummyMembershipManager[F[_]: Sync] extends MembershipManager[F]:
@@ -142,9 +142,9 @@ class DummyLogPropagator[F[_]: Sync] extends LogPropagator[F] {
     Sync[F].pure(LogRequestResponse(peer, term, prefixLength, success = true))
 }
 
-class InMemoryLog[F[_]: Sync, T] extends Log[F, T] {
+class InMemoryLog[F[_]: Sync, T] extends Log[F] {
   override val logStorage        = new InMemoryLogStorage[F]
-  override val snapshotStorage   = new InMemorySnapshotStorage[F, T]
+  override val snapshotStorage   = new InMemorySnapshotStorage[F]
   override val membershipManager = new DummyMembershipManager[F]
   override val stateMachine      = new InMemoryStateMachine[F, T]
 
@@ -174,16 +174,16 @@ class InMemoryStateStorage[F[_]: Sync] extends StateStorage[F] {
     ref.get.map(Some(_))
 }
 
-class InMemorySnapshotStorage[F[_]: Sync, T] extends SnapshotStorage[F, T] {
-  private val ref = Ref.unsafe[F, Option[Snapshot[T]]](None)
+class InMemorySnapshotStorage[F[_]: Sync] extends SnapshotStorage[F, Array[Byte]] {
+  private val ref = Ref.unsafe[F, Option[Snapshot[Array[Byte]]]](None)
 
-  override def persistSnapshot(snapshot: Snapshot[T]): F[Unit] =
+  override def persistSnapshot(snapshot: Snapshot[Array[Byte]]): F[Unit] =
     ref.set(Some(snapshot))
 
-  override def retrieveSnapshot: F[Option[Snapshot[T]]] =
+  override def retrieveSnapshot: F[Option[Snapshot[Array[Byte]]]] =
     ref.get
 
-  override def getLatestSnapshot: F[Snapshot[T]] =
+  override def getLatestSnapshot: F[Snapshot[Array[Byte]]] =
     ref.get.flatMap {
       case Some(snapshot) => Sync[F].pure(snapshot)
       case None           => Sync[F].raiseError(new RuntimeException("No snapshot available"))

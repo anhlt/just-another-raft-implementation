@@ -10,7 +10,7 @@ import scala.concurrent.duration.*
 import com.grok.raft.core.internal.RaftDeferred
 import com.grok.raft.core.storage.*
 
-trait Raft[F[_], T] {
+trait Raft[F[_]] {
 
   val config: ClusterConfiguration
 
@@ -20,7 +20,7 @@ trait Raft[F[_], T] {
 
   val logPropagator: LogPropagator[F]
 
-  val log: Log[F, T]
+  val log: Log[F]
 
   val stateStorage: StateStorage[F]
 
@@ -131,7 +131,7 @@ trait Raft[F[_], T] {
       (response, actions) <- modifyState(_.onLogRequest(msg, logState, logPrevSent, config))
       _                   <- updateLastHeartbeat
       _                   <- runActions(actions)
-      appended <-
+      _ <-
         if (response.success) {
           for {
             appended <- log.appendEntries(msg.entries, msg.prevSentLogIndex, msg.leaderCommit)
@@ -206,7 +206,7 @@ trait Raft[F[_], T] {
       for {
         node <- currentNode
         result <- node match
-          case leader: Leader => log.applyReadCommand(cmd)
+          case _: Leader => log.applyReadCommand(cmd)
           case _ =>
             for {
               leaderAddress <- leaderAnnouncer.listen()
@@ -218,7 +218,7 @@ trait Raft[F[_], T] {
       for {
         deferred <- deferred[T]
         node     <- currentNode
-        config   <- membershipManager.getClusterConfiguration
+        _        <- membershipManager.getClusterConfiguration
         actions  <- onWriteCommand(node, cmd, deferred)
         _        <- runActions(actions)
         result   <- deferred.get
@@ -267,7 +267,7 @@ trait Raft[F[_], T] {
           _             <- trace"The current leader is ${leaderAddress}."
           response      <- rpcClient.send(leaderAddress, cmd)
           _             <- trace"Response for the write command received from the leader"
-          actions       <- deferred.complete(response)
+          _             <- deferred.complete(response)
         } yield List.empty
       }
   }

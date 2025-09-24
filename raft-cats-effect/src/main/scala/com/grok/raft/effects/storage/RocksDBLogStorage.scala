@@ -4,7 +4,7 @@ import cats.effect.*
 import cats.syntax.all.*
 import com.grok.raft.core.internal.LogEntry
 import com.grok.raft.core.internal.storage.LogStorage
-import com.grok.raft.core.storage.BinarySerializer
+import com.grok.raft.effects.storage.BinarySerializer
 import java.nio.file.Path
 import java.nio.ByteBuffer
 

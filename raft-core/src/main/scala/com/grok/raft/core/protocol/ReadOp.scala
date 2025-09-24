@@ -1,11 +1,10 @@
 package com.grok.raft.core.protocol
 
-sealed trait ReadOp[K, V] extends ReadCommand[Option[V]]
+// Key-Value read operations using Array[Byte] for keys and values
+case class Get(key: Array[Byte]) extends ReadCommand[Option[Array[Byte]]]
 
-case class Get[K, V](key: K) extends ReadOp[K, V]
+case class Scan(startKey: Array[Byte], limit: Int) extends ReadCommand[Option[Array[Byte]]]
 
-case class Scan[K, V](startKey: K, limit: Int) extends ReadOp[K, V]
+case class Range(startKey: Array[Byte], endKey: Array[Byte]) extends ReadCommand[List[Array[Byte]]]
 
-case class Range[K, V](startKey: K, endKey: K) extends ReadOp[K, V]
-
-case class Keys[K, V](prefix: Option[K] = None) extends ReadOp[K, V]
+case class Keys(prefix: Option[Array[Byte]] = None) extends ReadCommand[List[Array[Byte]]]

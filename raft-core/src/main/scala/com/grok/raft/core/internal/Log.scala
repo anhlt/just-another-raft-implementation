@@ -13,11 +13,11 @@ import org.typelevel.log4cats.syntax.*
 
 import scala.collection.concurrent.TrieMap
 
-trait Log[F[_], T]:
+trait Log[F[_]]:
 
   val logStorage: LogStorage[F]
 
-  val snapshotStorage: SnapshotStorage[F, T]
+  val snapshotStorage: SnapshotStorage[F, Array[Byte]]
 
   private val deferreds = TrieMap[Long, RaftDeferred[F, Any]]()
 
@@ -25,7 +25,7 @@ trait Log[F[_], T]:
 
   def transactional[A](t: => F[A]): F[A]
 
-  val stateMachine: StateMachine[F, T]
+  val stateMachine: StateMachine[F]
 
   def initialize(using
       MonadThrow[F],
@@ -99,10 +99,14 @@ trait Log[F[_], T]:
   ): F[Unit] =
     if (entries.nonEmpty && currentLogIndex > leaderPrevLogIndex) {
       for {
+        _                      <- trace"Checking for log inconsistencies at index: $currentLogIndex"
         lastEntryOnCurrentNode <- logStorage.get(currentLogIndex)
         result <-
           if (lastEntryOnCurrentNode.isDefined && lastEntryOnCurrentNode.get.term != entries.head.term)
-            logStorage.deleteAfter(leaderPrevLogIndex)
+            for {
+              _ <- trace"Log inconsistency detected, truncating after index: $leaderPrevLogIndex"
+              _ <- logStorage.deleteAfter(leaderPrevLogIndex)
+            } yield ()
           else Monad[F].unit
 
       } yield result
@@ -256,13 +260,15 @@ trait Log[F[_], T]:
   }
 
   def applyCommand(index: Long, command: Command[?])(using MonadThrow[F]): F[Unit] = {
-    val output = command match {
+    val output: F[Any] = command match {
 
       case command: ReadCommand[_] =>
-        stateMachine.applyRead.apply(command)
+        stateMachine.applyRead.apply(command).asInstanceOf[F[Any]]
 
       case command: WriteCommand[_] =>
-        stateMachine.applyWrite.apply((index, command))
+        stateMachine.applyWrite
+          .apply((index, command.asInstanceOf[WriteCommand[Option[Array[Byte]]]]))
+          .asInstanceOf[F[Any]]
     }
 
     output.flatMap(result =>
@@ -273,8 +279,8 @@ trait Log[F[_], T]:
     )
   }
 
-  def applyReadCommand[T](command: ReadCommand[?])(using MonadThrow[F]): F[T] =
-    stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
+  def applyReadCommand[A](command: ReadCommand[A]): F[A] =
+    stateMachine.applyRead.apply(command)
 
   def compactLogs()(using MonadThrow[F], Logger[F]): F[Unit] = {
     for {
@@ -284,15 +290,15 @@ trait Log[F[_], T]:
       _ <-
         if (appliedIndex > 0 && shouldCompact) {
           for {
-            snapshot <- createSnapshot(appliedIndex)
-            _        <- logStorage.deleteBefore(appliedIndex)
-            _        <- trace"Log entries before index $appliedIndex have been compacted"
+            _ <- createSnapshot(appliedIndex)
+            _ <- logStorage.deleteBefore(appliedIndex)
+            _ <- trace"Log entries before index $appliedIndex have been compacted"
           } yield ()
         } else Monad[F].unit
     } yield ()
   }
 
-  def createSnapshot(lastIndex: Long)(using MonadThrow[F], Logger[F]): F[Snapshot[T]] = {
+  def createSnapshot(lastIndex: Long)(using MonadThrow[F], Logger[F]): F[Snapshot[Array[Byte]]] = {
     for {
       _            <- trace"Creating snapshot up to index: $lastIndex"
       currentState <- stateMachine.getCurrentState
@@ -305,7 +311,7 @@ trait Log[F[_], T]:
 
   def shouldCreateSnapshot()(using Monad[F]): F[Boolean] = {
     for {
-      lastLogIndex <- logStorage.lastIndex
+      _            <- logStorage.lastIndex
       appliedIndex <- stateMachine.appliedIndex
       lastSnapshot <- snapshotStorage.retrieveSnapshot
       lastSnapshotIndex = lastSnapshot.map(_.lastIndex).getOrElse(0L)
@@ -313,7 +319,7 @@ trait Log[F[_], T]:
     } yield logsSinceSnapshot > 1000
   }
 
-  def installSnapshot(snapshot: Snapshot[T])(using MonadThrow[F], Logger[F]): F[Unit] = {
+  def installSnapshot(snapshot: Snapshot[Array[Byte]])(using MonadThrow[F], Logger[F]): F[Unit] = {
     transactional {
       for {
         _ <- trace"Installing snapshot with last index: ${snapshot.lastIndex}"
@@ -332,7 +338,7 @@ trait Log[F[_], T]:
     } yield snapshot.map(s => (s.lastIndex, s.config))
   }
 
-  def restoreSnapshot[T](snapshot: Snapshot[T])(using
+  def restoreSnapshot(snapshot: Snapshot[Array[Byte]])(using
       Monad[F],
       Logger[F]
   ): F[Unit] =

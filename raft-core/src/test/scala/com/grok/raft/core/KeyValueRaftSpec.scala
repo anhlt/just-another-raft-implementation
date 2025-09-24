@@ -25,38 +25,38 @@ class KeyValueRaftSpec extends CatsEffectSuite {
       stateMachine = KeyValueStateMachine.apply[IO](storage, appliedIndexRef)
 
       // Test Create operation
-      createResultAny <- stateMachine.applyWrite((1L, Create("key1", "value1")))
-      createResult = createResultAny.asInstanceOf[Option[String]]
+      createResultAny <- stateMachine.applyWrite((1L, Create("key1".getBytes("UTF-8"), "value1".getBytes("UTF-8"))))
+      createResult = createResultAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _            = assertEquals(createResult, Some("value1"))
 
       // Test Read operation
-      readResultAny <- stateMachine.applyRead(Get("key1"))
-      readResult = readResultAny.asInstanceOf[Option[String]]
+      readResultAny <- stateMachine.applyRead(Get("key1".getBytes("UTF-8")))
+      readResult = readResultAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _          = assertEquals(readResult, Some("value1"))
 
       // Test Update operation
-      updateResultAny <- stateMachine.applyWrite((2L, Update("key1", "updated-value")))
-      updateResult = updateResultAny.asInstanceOf[Option[String]]
+      updateResultAny <- stateMachine.applyWrite((2L, Update("key1".getBytes("UTF-8"), "updated-value".getBytes("UTF-8"))))
+      updateResult = updateResultAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _            = assertEquals(updateResult, Some("updated-value"))
 
       // Verify update worked
-      readAfterUpdateAny <- stateMachine.applyRead(Get("key1"))
-      readAfterUpdate = readAfterUpdateAny.asInstanceOf[Option[String]]
+      readAfterUpdateAny <- stateMachine.applyRead(Get("key1".getBytes("UTF-8")))
+      readAfterUpdate = readAfterUpdateAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _               = assertEquals(readAfterUpdate, Some("updated-value"))
 
       // Test key that doesn't exist
-      nonExistentReadAny <- stateMachine.applyRead(Get("non-existent"))
-      nonExistentRead = nonExistentReadAny.asInstanceOf[Option[String]]
+      nonExistentReadAny <- stateMachine.applyRead(Get("non-existent".getBytes("UTF-8")))
+      nonExistentRead = nonExistentReadAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _               = assertEquals(nonExistentRead, None)
 
       // Test Delete operation
-      deleteResultAny <- stateMachine.applyWrite((3L, Delete("key1")))
-      deleteResult = deleteResultAny.asInstanceOf[Option[String]]
+      deleteResultAny <- stateMachine.applyWrite((3L, Delete("key1".getBytes("UTF-8"))))
+      deleteResult = deleteResultAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _            = assertEquals(deleteResult, Some("updated-value")) // Returns old value
 
       // Verify deletion worked
-      readAfterDeleteAny <- stateMachine.applyRead(Get("key1"))
-      readAfterDelete = readAfterDeleteAny.asInstanceOf[Option[String]]
+      readAfterDeleteAny <- stateMachine.applyRead(Get("key1".getBytes("UTF-8")))
+      readAfterDelete = readAfterDeleteAny.asInstanceOf[Option[Array[Byte]]].map(new String(_, "UTF-8"))
       _               = assertEquals(readAfterDelete, None)
 
       // Cleanup
@@ -71,29 +71,29 @@ class KeyValueRaftSpec extends CatsEffectSuite {
       stateMachine = KeyValueStateMachine.apply[IO](storage, appliedIndexRef)
 
       // Insert test data
-      _ <- stateMachine.applyWrite((1L, Create("apple", "fruit")))
-      _ <- stateMachine.applyWrite((2L, Create("banana", "fruit")))
-      _ <- stateMachine.applyWrite((3L, Create("carrot", "vegetable")))
-      _ <- stateMachine.applyWrite((4L, Create("date", "fruit")))
+      _ <- stateMachine.applyWrite((1L, Create("apple".getBytes("UTF-8"), "fruit".getBytes("UTF-8"))))
+      _ <- stateMachine.applyWrite((2L, Create("banana".getBytes("UTF-8"), "fruit".getBytes("UTF-8"))))
+      _ <- stateMachine.applyWrite((3L, Create("carrot".getBytes("UTF-8"), "vegetable".getBytes("UTF-8"))))
+      _ <- stateMachine.applyWrite((4L, Create("date".getBytes("UTF-8"), "fruit".getBytes("UTF-8"))))
 
       // Test range operation (scan between two keys)
-      rangeResultAny <- stateMachine.applyRead(Range("apple", "carrot"))
-      rangeResult = rangeResultAny.asInstanceOf[Option[String]]
-      _           = assert(rangeResult.isDefined, "Range should return results")
-      _ = assert(rangeResult.get.contains("apple:fruit"), s"Should contain apple:fruit, got: ${rangeResult.get}")
-      _ = assert(rangeResult.get.contains("banana:fruit"), s"Should contain banana:fruit, got: ${rangeResult.get}")
+      rangeResultAny <- stateMachine.applyRead(Range("apple".getBytes("UTF-8"), "carrot".getBytes("UTF-8")))
+      rangeResult = rangeResultAny.asInstanceOf[List[Array[Byte]]].map(new String(_, "UTF-8")).mkString(",")
+      _           = assert(rangeResult.nonEmpty, "Range should return results")
+      _ = assert(rangeResult.contains("apple"), s"Should contain apple, got: ${rangeResult}")
+      _ = assert(rangeResult.contains("banana"), s"Should contain banana, got: ${rangeResult}")
 
       // Test scan operation with limit
-      scanResultAny <- stateMachine.applyRead(Scan("apple", 2))
-      scanResult = scanResultAny.asInstanceOf[Option[String]]
-      _          = assert(scanResult.isDefined, "Scan should return results")
-      _          = assert(scanResult.get.contains("apple:fruit"), s"Should contain apple:fruit, got: ${scanResult.get}")
+      scanResultAny <- stateMachine.applyRead(Scan("apple".getBytes("UTF-8"), 2))
+      scanResult = scanResultAny.asInstanceOf[List[Array[Byte]]].map(new String(_, "UTF-8")).mkString(",")
+      _          = assert(scanResult.nonEmpty, "Scan should return results")
+      _          = assert(scanResult.contains("apple"), s"Should contain apple, got: ${scanResult}")
 
       // Test keys operation
-      keysResultAny <- stateMachine.applyRead(Keys(Some("a"))) // Keys starting with "a"
-      keysResult = keysResultAny.asInstanceOf[Option[String]]
-      _          = assert(keysResult.isDefined, "Keys should return results")
-      _          = assert(keysResult.get.contains("apple"), s"Should contain apple key, got: ${keysResult.get}")
+      keysResultAny <- stateMachine.applyRead(Keys(Some("a".getBytes("UTF-8")))) // Keys starting with "a"
+      keysResult = keysResultAny.asInstanceOf[List[Array[Byte]]].map(new String(_, "UTF-8"))
+      _          = assert(keysResult.nonEmpty, "Keys should return results")
+      _          = assert(keysResult.contains("apple"), s"Should contain apple key, got: ${keysResult}")
 
       _ <- storage.close()
     } yield ()
@@ -112,7 +112,7 @@ class KeyValueRaftSpec extends CatsEffectSuite {
       mockConfig      = ClusterConfiguration(mockNode, List(mockNodeAddress))
 
       // Create a KeyValueRaft instance directly (bypassing complex dependencies)
-      kvRaft = new KeyValueRaft[IO](stateMachine, storage, mockConfig, null, null)
+      kvRaft = new KeyValueRaft[IO](stateMachine, storage)
 
       // Test put operation (upsert functionality)
       putResult1 <- kvRaft.put("user:123", "John Doe")
@@ -148,9 +148,9 @@ class KeyValueRaftSpec extends CatsEffectSuite {
 
       // Test keys operation with prefix
       keysResult <- kvRaft.keys(Some("user:"), bypassConsensus = true)
-      _ = assert(keysResult.isDefined, "Keys should return results")
-      _ = assert(keysResult.get.contains("user:123"), s"Should contain user:123 key, got: ${keysResult.get}")
-      _ = assert(keysResult.get.contains("user:124"), s"Should contain user:124 key, got: ${keysResult.get}")
+      _ = assert(keysResult.nonEmpty, "Keys should return results")
+      _ = assert(keysResult.contains("user:123"), s"Should contain user:123 key, got: ${keysResult}")
+      _ = assert(keysResult.contains("user:124"), s"Should contain user:124 key, got: ${keysResult}")
 
       // Test delete operation
       deleteResult <- kvRaft.delete("user:125")
@@ -178,7 +178,7 @@ class KeyValueRaftSpec extends CatsEffectSuite {
       mockNodeAddress = NodeAddress("127.0.0.1", 8080)
       mockNode        = Follower(mockNodeAddress, 1L)
       mockConfig      = ClusterConfiguration(mockNode, List(mockNodeAddress))
-      kvRaft          = new KeyValueRaft[IO](stateMachine, storage, mockConfig, null, null)
+      kvRaft          = new KeyValueRaft[IO](stateMachine, storage)
 
       // Insert some test data
       _ <- kvRaft.put("test:1", "value1")
@@ -222,7 +222,7 @@ class KeyValueRaftSpec extends CatsEffectSuite {
       mockNodeAddress = NodeAddress("127.0.0.1", 8080)
       mockNode        = Follower(mockNodeAddress, 1L)
       mockConfig      = ClusterConfiguration(mockNode, List(mockNodeAddress))
-      kvRaft          = new KeyValueRaft[IO](stateMachine, storage, mockConfig, null, null)
+      kvRaft          = new KeyValueRaft[IO](stateMachine, storage)
 
       // Test empty key and value handling
       emptyKeyResult <- kvRaft.put("", "empty-key-value")
@@ -258,7 +258,7 @@ class KeyValueRaftSpec extends CatsEffectSuite {
 
       // Test keys with no results
       noResultsKeys <- kvRaft.keys(Some("zzz-nonexistent:prefix:"), bypassConsensus = true)
-      _ = assertEquals(noResultsKeys, None)
+      _ = assertEquals(noResultsKeys, List.empty[String])
 
       // Test scan with limit 0 (should return no results)
       zeroLimitScan <- kvRaft.scan("", 0, bypassConsensus = true)

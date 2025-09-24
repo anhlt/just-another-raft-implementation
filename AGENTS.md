@@ -13,6 +13,10 @@
 - **Formatting**: Use scalafmt with `align.preset = more`
 - **Imports**: Group external imports first, then internal `com.grok.raft` imports
 - **Package structure**: `com.grok.raft.{core|effects}`
+- **Functional Programming**: Always use immutable variables (`val`), never mutable (`var`)
+- **Data structures**: Prefer immutable collections (List, Map, Set) over mutable alternatives
+- **State management**: Use immutable case classes with functional updates via `copy()`
+- **Side effects**: Encapsulate all side effects in `F[_]` monads (IO, etc.)
 - **Error handling**: Use custom error types (`RaftError`, `LogError`, `MembershipError`) extending `BaseError`
 - **Effects**: Cats Effect 3 with `F[_]: MonadThrow` constraints
 - **Logging**: Use `org.typelevel.log4cats` with `trace`, `debug`, `info` syntax
@@ -21,4 +25,3 @@
 - **Pattern matching**: Use match expressions with exhaustive patterns
 - **Naming**: camelCase for methods/variables, PascalCase for classes/traits/objects
 - **Comments**: Scaladoc for public APIs, minimal inline comments
-- **State**: Immutable data structures with case classes, functional state updates

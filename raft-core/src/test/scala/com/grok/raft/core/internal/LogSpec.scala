@@ -166,14 +166,14 @@ class LogSpec extends CatsEffectSuite {
   test("createSnapshot should capture current state and persist it") {
     for {
       log    <- IO(new InMemoryLog[IO, String])
-      _      <- log.stateMachine.restoreSnapshot(5L, "test-state")
+      _      <- log.stateMachine.restoreSnapshot(5L, "test-state".getBytes("UTF-8"))
       config <- log.membershipManager.getClusterConfiguration
 
       snapshot  <- log.createSnapshot(5L)
       retrieved <- log.snapshotStorage.retrieveSnapshot
     } yield {
       assertEquals(snapshot.lastIndex, 5L)
-      assertEquals(snapshot.data, "test-state")
+      assertEquals(new String(snapshot.data, "UTF-8"), "test-state")
       assertEquals(snapshot.config, config)
       assert(retrieved.isDefined)
       assertEquals(retrieved.get, snapshot)
@@ -191,7 +191,7 @@ class LogSpec extends CatsEffectSuite {
       _ <- store.put(3, LogEntry(1, 3, NoOp))
 
       config <- log.membershipManager.getClusterConfiguration
-      snapshot = Snapshot(2L, "snapshot-state", config)
+      snapshot = Snapshot(2L, "snapshot-state".getBytes("UTF-8"), config)
 
       _ <- log.installSnapshot(snapshot)
 
@@ -205,7 +205,7 @@ class LogSpec extends CatsEffectSuite {
       e2 <- store.get(2)
       e3 <- store.get(3)
     } yield {
-      assertEquals(state, "snapshot-state")
+      assertEquals(new String(state, "UTF-8"), "snapshot-state")
       assertEquals(appliedIndex, 2L)
       assertEquals(commitIndex, 2L)
       assert(e1.isDefined, "entry 1 should remain")
@@ -219,7 +219,7 @@ class LogSpec extends CatsEffectSuite {
       log <- IO(new InMemoryLog[IO, String])
 
       // Set applied index to simulate many logs since last snapshot
-      _ <- log.stateMachine.restoreSnapshot(1500L, "state")
+      _ <- log.stateMachine.restoreSnapshot(1500L, "state".getBytes("UTF-8"))
 
       shouldCreate <- log.shouldCreateSnapshot()
     } yield {
@@ -232,7 +232,7 @@ class LogSpec extends CatsEffectSuite {
       log <- IO(new InMemoryLog[IO, String])
 
       // Set applied index to simulate few logs since last snapshot
-      _ <- log.stateMachine.restoreSnapshot(100L, "state")
+      _ <- log.stateMachine.restoreSnapshot(100L, "state".getBytes("UTF-8"))
 
       shouldCreate <- log.shouldCreateSnapshot()
     } yield {
@@ -244,7 +244,7 @@ class LogSpec extends CatsEffectSuite {
     for {
       log    <- IO(new InMemoryLog[IO, String])
       config <- log.membershipManager.getClusterConfiguration
-      snapshot = Snapshot(10L, "meta-state", config)
+      snapshot = Snapshot(10L, "meta-state".getBytes("UTF-8"), config)
 
       _        <- log.snapshotStorage.persistSnapshot(snapshot)
       metadata <- log.getSnapshotMetadata()
@@ -261,7 +261,7 @@ class LogSpec extends CatsEffectSuite {
       store = log.logStorage
 
       // Set up state to trigger compaction
-      _ <- log.stateMachine.restoreSnapshot(1500L, "compact-state")
+      _ <- log.stateMachine.restoreSnapshot(1500L, "compact-state".getBytes("UTF-8"))
 
       // Add some log entries
       _ <- store.put(1498, LogEntry(1, 1498, NoOp))

@@ -1,6 +1,5 @@
 package com.grok.raft.core.internal
 
-import cats.effect.IO
 import munit.CatsEffectSuite
 import com.grok.raft.core.protocol.LogRequestResponse
 import com.grok.raft.core.ClusterConfiguration

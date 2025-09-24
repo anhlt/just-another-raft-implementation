@@ -1,11 +1,10 @@
 package com.grok.raft.core.protocol
 
-sealed trait WriteOp[K, V] extends WriteCommand[Option[V]]
+// Key-Value write operations using Array[Byte] for keys and values
+case class Create(key: Array[Byte], value: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
 
-case class Create[K, V](key: K, value: V) extends WriteOp[K, V]
+case class Update(key: Array[Byte], value: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
 
-case class Update[K, V](key: K, value: V) extends WriteOp[K, V]
+case class Delete(key: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
 
-case class Delete[K, V](key: K) extends WriteOp[K, V]
-
-case class Upsert[K, V](key: K, value: V) extends WriteOp[K, V]
+case class Upsert(key: Array[Byte], value: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]

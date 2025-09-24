@@ -1,5 +1,6 @@
 package com.grok.raft.core.storage
 
+import java.nio.ByteBuffer
 import com.grok.raft.core.protocol.{
   Command,
   WriteCommand,
@@ -15,13 +16,7 @@ import com.grok.raft.core.protocol.{
 }
 import com.grok.raft.core.internal.LogEntry
 
-trait BinarySerializable {
-  def serializeLogEntry(entry: LogEntry): Array[Byte]
-  def deserializeLogEntry(bytes: Array[Byte]): LogEntry
-}
-
-object DefaultBinarySerializer extends BinarySerializable {
-  import java.nio.ByteBuffer
+object ByteBufferBinarySerializer extends BinarySerializable {
 
   def serializeLogEntry(entry: LogEntry): Array[Byte] = {
     val buffer = ByteBuffer.allocate(1024)
@@ -29,14 +24,14 @@ object DefaultBinarySerializer extends BinarySerializable {
     buffer.putLong(entry.index)
 
     entry.command match {
-      case writeOp: WriteCommand[_] =>
-        buffer.put(1.toByte)
-        serializeWriteCommand(writeOp, buffer)
-      case readOp: ReadCommand[_] =>
-        buffer.put(2.toByte)
-        serializeReadCommand(readOp, buffer)
+      case writeCmd: WriteCommand[?] =>
+        buffer.put(1.toByte) // WriteCommand marker
+        serializeWriteCommand(writeCmd, buffer)
+      case readCmd: ReadCommand[?] =>
+        buffer.put(2.toByte) // ReadCommand marker  
+        serializeReadCommand(readCmd, buffer)
       case other =>
-        buffer.put(0.toByte)
+        buffer.put(0.toByte) // Other command marker
         val serialized = other.toString.getBytes("UTF-8")
         buffer.putInt(serialized.length)
         buffer.put(serialized)
@@ -61,13 +56,14 @@ object DefaultBinarySerializer extends BinarySerializable {
         val length       = buffer.getInt()
         val commandBytes = new Array[Byte](length)
         buffer.get(commandBytes)
+        // For unknown commands, return a simple Get operation as fallback
         Get(commandBytes)
     }
 
     LogEntry(term, index, command)
   }
 
-  private def serializeWriteCommand(writeCmd: WriteCommand[_], buffer: ByteBuffer): Unit = {
+  private def serializeWriteCommand(writeCmd: WriteCommand[?], buffer: ByteBuffer): Unit = {
     writeCmd match {
       case Create(key, value) =>
         buffer.put(1.toByte)
@@ -87,28 +83,28 @@ object DefaultBinarySerializer extends BinarySerializable {
     }
   }
 
-  private def deserializeWriteCommand(buffer: ByteBuffer): WriteCommand[Option[Array[Byte]]] = {
+  private def deserializeWriteCommand(buffer: ByteBuffer): WriteCommand[?] = {
     val opType = buffer.get()
     opType match {
       case 1 =>
-        val key   = deserializeByteArray(buffer)
+        val key = deserializeByteArray(buffer)
         val value = deserializeByteArray(buffer)
         Create(key, value)
       case 2 =>
-        val key   = deserializeByteArray(buffer)
+        val key = deserializeByteArray(buffer)
         val value = deserializeByteArray(buffer)
         Update(key, value)
       case 3 =>
         val key = deserializeByteArray(buffer)
         Delete(key)
       case 4 =>
-        val key   = deserializeByteArray(buffer)
+        val key = deserializeByteArray(buffer)
         val value = deserializeByteArray(buffer)
         Upsert(key, value)
     }
   }
 
-  private def serializeReadCommand(readCmd: ReadCommand[_], buffer: ByteBuffer): Unit = {
+  private def serializeReadCommand(readCmd: ReadCommand[?], buffer: ByteBuffer): Unit = {
     readCmd match {
       case Get(key) =>
         buffer.put(1.toByte)
@@ -116,7 +112,7 @@ object DefaultBinarySerializer extends BinarySerializable {
       case Scan(startKey, limit) =>
         buffer.put(2.toByte)
         serializeByteArray(startKey, buffer)
-        buffer.putInt(limit): Unit
+         buffer.putInt(limit): Unit
       case Range(startKey, endKey) =>
         buffer.put(3.toByte)
         serializeByteArray(startKey, buffer)
@@ -128,7 +124,7 @@ object DefaultBinarySerializer extends BinarySerializable {
             buffer.put(1.toByte)
             serializeByteArray(p, buffer)
           case None =>
-            buffer.put(0.toByte): Unit
+             buffer.put(0.toByte): Unit
         }
     }
   }
