@@ -10,37 +10,39 @@ import org.typelevel.log4cats.syntax.*
 
 import scala.collection.concurrent.TrieMap
 
-/**
- * Key-Value State Machine implementation that handles WriteOp and ReadOp operations
- * using a generic KeyValueStorage as the underlying storage engine.
- * 
- * This implementation provides:
- * - CRUD operations via WriteOp (Create, Update, Delete, Upsert) 
- * - Query operations via ReadOp (Get, Scan, Range, Keys)
- * - Persistent storage backed by KeyValueStorage implementation
- * - Thread-safe concurrent access
- * 
- * @param storage The key-value storage for persistent data
- * @param appliedIndexRef Reference to track the last applied log index
- * @tparam F The effect type (e.g., IO, Task)
- */
+/** Key-Value State Machine implementation that handles WriteOp and ReadOp operations using a generic KeyValueStorage as
+  * the underlying storage engine.
+  *
+  * This implementation provides:
+  *   - CRUD operations via WriteOp (Create, Update, Delete, Upsert)
+  *   - Query operations via ReadOp (Get, Scan, Range, Keys)
+  *   - Persistent storage backed by KeyValueStorage implementation
+  *   - Thread-safe concurrent access
+  *
+  * @param storage
+  *   The key-value storage for persistent data
+  * @param appliedIndexRef
+  *   Reference to track the last applied log index
+  * @tparam F
+  *   The effect type (e.g., IO, Task)
+  */
 class KeyValueStateMachine[F[_]: MonadThrow: Logger](
-  storage: KeyValueStorage[F],
-  appliedIndexRef: Ref[F, Long]
+    storage: KeyValueStorage[F],
+    appliedIndexRef: Ref[F, Long]
 ) extends StateMachine[F, Map[String, String]] {
 
   // In-memory cache for faster reads (optional optimization)
   private val cache = TrieMap[String, String]()
-  
+
   def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]] = {
     case (index, writeOp: WriteOp[String, String]) =>
       for {
-        _ <- trace"Applying write operation at index $index: $writeOp"
+        _      <- trace"Applying write operation at index $index: $writeOp"
         result <- executeWriteOp(writeOp)
-        _ <- appliedIndexRef.set(index)
-        _ <- trace"Write operation completed: $result"
+        _      <- appliedIndexRef.set(index)
+        _      <- trace"Write operation completed: $result"
       } yield result
-      
+
     case (index, otherWrite: WriteCommand[?]) =>
       for {
         _ <- trace"Unknown write command at index $index: $otherWrite"
@@ -51,18 +53,18 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
   def applyRead: PartialFunction[ReadCommand[?], F[Any]] = {
     case readOp: ReadOp[String, String] =>
       for {
-        _ <- trace"Applying read operation: $readOp" 
+        _      <- trace"Applying read operation: $readOp"
         result <- executeReadOp(readOp)
-        _ <- trace"Read operation completed: $result"
+        _      <- trace"Read operation completed: $result"
       } yield result
-      
+
     case otherRead: ReadCommand[?] =>
       for {
         _ <- trace"Unknown read command: $otherRead"
       } yield None
   }
 
-  def appliedIndex: F[Long] = 
+  def appliedIndex: F[Long] =
     appliedIndexRef.get
 
   def restoreSnapshot[T](lastIndex: Long, data: T): F[Unit] =
@@ -72,9 +74,9 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
           _ <- trace"Restoring snapshot at index $lastIndex with ${kvMap.size} entries"
           // Clear existing data
           existingKeys <- storage.keys()
-          _ <- existingKeys.toList.traverse_(storage.remove)
-          _ <- MonadThrow[F].catchNonFatal(cache.clear())
-          
+          _            <- existingKeys.toList.traverse_(storage.remove)
+          _            <- MonadThrow[F].catchNonFatal(cache.clear())
+
           // Restore data
           _ <- kvMap.toList.traverse_ { case (k, v) =>
             for {
@@ -85,7 +87,7 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
           _ <- appliedIndexRef.set(lastIndex)
           _ <- trace"Snapshot restored successfully"
         } yield ()
-        
+
       case _ =>
         for {
           _ <- trace"Invalid snapshot data type for KeyValueStateMachine"
@@ -95,7 +97,7 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
 
   def getCurrentState: F[Map[String, String]] =
     for {
-      _ <- trace"Getting current state from storage"
+      _       <- trace"Getting current state from storage"
       allKeys <- storage.keys()
       kvPairs <- allKeys.toList.traverse { key =>
         storage.get(key).map(_.map(key -> _))
@@ -108,44 +110,47 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
     writeOp match {
       case Create(key, value) =>
         for {
-          _ <- trace"Create operation: $key -> $value"
+          _        <- trace"Create operation: $key -> $value"
           existing <- storage.get(key)
-          result <- if (existing.isDefined) {
-            MonadThrow[F].pure(existing) // Return existing value, don't overwrite
-          } else {
-            for {
-              _ <- storage.put(key, value)
-              _ <- MonadThrow[F].catchNonFatal(cache.put(key, value))
-            } yield Some(value) // Return the created value
-          }
+          result <-
+            if (existing.isDefined) {
+              MonadThrow[F].pure(existing) // Return existing value, don't overwrite
+            } else {
+              for {
+                _ <- storage.put(key, value)
+                _ <- MonadThrow[F].catchNonFatal(cache.put(key, value))
+              } yield Some(value) // Return the created value
+            }
         } yield result
 
       case Update(key, value) =>
         for {
-          _ <- trace"Update operation: $key -> $value"
+          _        <- trace"Update operation: $key -> $value"
           existing <- storage.get(key)
-          result <- if (existing.isDefined) {
-            for {
-              _ <- storage.put(key, value)
-              _ <- MonadThrow[F].catchNonFatal(cache.put(key, value))
-            } yield Some(value) // Return the new value
-          } else {
-            MonadThrow[F].pure(None) // Key didn't exist
-          }
+          result <-
+            if (existing.isDefined) {
+              for {
+                _ <- storage.put(key, value)
+                _ <- MonadThrow[F].catchNonFatal(cache.put(key, value))
+              } yield Some(value) // Return the new value
+            } else {
+              MonadThrow[F].pure(None) // Key didn't exist
+            }
         } yield result
 
       case Delete(key) =>
         for {
-          _ <- trace"Delete operation: $key"
+          _        <- trace"Delete operation: $key"
           existing <- storage.get(key)
-          result <- if (existing.isDefined) {
-            for {
-              _ <- storage.remove(key)
-              _ <- MonadThrow[F].catchNonFatal(cache.remove(key))
-            } yield existing // Return deleted value
-          } else {
-            MonadThrow[F].pure(None)
-          }
+          result <-
+            if (existing.isDefined) {
+              for {
+                _ <- storage.remove(key)
+                _ <- MonadThrow[F].catchNonFatal(cache.remove(key))
+              } yield existing // Return deleted value
+            } else {
+              MonadThrow[F].pure(None)
+            }
         } yield result
 
       case Upsert(key, value) =>
@@ -164,7 +169,7 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
           // Try cache first, then storage
           result <- MonadThrow[F].catchNonFatal(cache.get(key)) flatMap {
             case Some(cachedValue) => MonadThrow[F].pure(Some(cachedValue))
-            case None => 
+            case None =>
               storage.get(key).flatMap {
                 case Some(value) =>
                   for {
@@ -177,27 +182,29 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
 
       case Scan(startKey, limit) =>
         for {
-          _ <- trace"Scan operation: startKey=$startKey, limit=$limit"
+          _          <- trace"Scan operation: startKey=$startKey, limit=$limit"
           scanResult <- storage.scan(startKey)
           limitedResults = scanResult.take(limit)
-          _ <- limitedResults.toList.traverse_ { case (k, v) => 
+          _ <- limitedResults.toList.traverse_ { case (k, v) =>
             MonadThrow[F].catchNonFatal(cache.put(k, v)) // Update cache
           }
-          result = if (limitedResults.nonEmpty) {
-            Some(limitedResults.map { case (k, v) => s"$k:$v" }.mkString(","))
-          } else None
+          result =
+            if (limitedResults.nonEmpty) {
+              Some(limitedResults.map { case (k, v) => s"$k:$v" }.mkString(","))
+            } else None
         } yield result
 
       case Range(startKey, endKey) =>
         for {
-          _ <- trace"Range operation: startKey=$startKey, endKey=$endKey"
+          _           <- trace"Range operation: startKey=$startKey, endKey=$endKey"
           rangeResult <- storage.range(startKey, endKey)
-          _ <- rangeResult.toList.traverse_ { case (k, v) => 
+          _ <- rangeResult.toList.traverse_ { case (k, v) =>
             MonadThrow[F].catchNonFatal(cache.put(k, v)) // Update cache
           }
-          result = if (rangeResult.nonEmpty) {
-            Some(rangeResult.map { case (k, v) => s"$k:$v" }.mkString(","))
-          } else None
+          result =
+            if (rangeResult.nonEmpty) {
+              Some(rangeResult.map { case (k, v) => s"$k:$v" }.mkString(","))
+            } else None
         } yield result
 
       case Keys(prefixOpt) =>
@@ -209,7 +216,7 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
                 prefixKeys <- storage.scan(prefix).map(_.keySet)
                 filteredKeys = prefixKeys.filter(_.startsWith(prefix))
               } yield if (filteredKeys.nonEmpty) Some(filteredKeys.mkString(",")) else None
-              
+
             case None =>
               for {
                 allKeys <- storage.keys()
@@ -221,8 +228,8 @@ class KeyValueStateMachine[F[_]: MonadThrow: Logger](
 
 object KeyValueStateMachine {
   def apply[F[_]: MonadThrow: Logger](
-    storage: KeyValueStorage[F],
-    appliedIndexRef: Ref[F, Long]
+      storage: KeyValueStorage[F],
+      appliedIndexRef: Ref[F, Long]
   ): KeyValueStateMachine[F] =
     new KeyValueStateMachine[F](storage, appliedIndexRef)
 }

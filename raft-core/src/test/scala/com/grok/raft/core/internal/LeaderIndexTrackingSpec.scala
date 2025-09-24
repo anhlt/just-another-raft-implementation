@@ -31,11 +31,11 @@ class LeaderIndexTrackingSpec extends FunSuite {
 
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
-    
+
     assertEquals(updatedLeader.sentIndexMap(addrB), 8L) // ackLogIndex
     assertEquals(updatedLeader.ackIndexMap(addrB), 8L)
     assertEquals(updatedLeader.sentIndexMap(addrC), 3L) // unchanged
-    assertEquals(updatedLeader.ackIndexMap(addrC), 2L) // unchanged
+    assertEquals(updatedLeader.ackIndexMap(addrC), 2L)  // unchanged
 
     assertEquals(actions.length, 1)
     assert(actions.head.isInstanceOf[CommitLogs])
@@ -57,9 +57,9 @@ class LeaderIndexTrackingSpec extends FunSuite {
 
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
-    
+
     assertEquals(updatedLeader.sentIndexMap(addrB), 4L) // decremented from 5 to 4
-    assertEquals(updatedLeader.ackIndexMap(addrB), 3L) // unchanged on failure
+    assertEquals(updatedLeader.ackIndexMap(addrB), 3L)  // unchanged on failure
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
@@ -79,9 +79,9 @@ class LeaderIndexTrackingSpec extends FunSuite {
 
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
-    
+
     assertEquals(updatedLeader.sentIndexMap(addrB), -1L) // decremented to -1
-    assertEquals(updatedLeader.ackIndexMap(addrB), -1L) // unchanged
+    assertEquals(updatedLeader.ackIndexMap(addrB), -1L)  // unchanged
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
@@ -101,9 +101,9 @@ class LeaderIndexTrackingSpec extends FunSuite {
 
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
-    
+
     assertEquals(updatedLeader.sentIndexMap(addrB), -1L) // stays at -1
-    assertEquals(updatedLeader.ackIndexMap(addrB), -1L) // unchanged
+    assertEquals(updatedLeader.ackIndexMap(addrB), -1L)  // unchanged
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
@@ -145,9 +145,9 @@ class LeaderIndexTrackingSpec extends FunSuite {
 
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
-    
+
     assertEquals(updatedLeader.sentIndexMap(addrB), -1L) // defaults to -1 when not found
-    assert(!updatedLeader.ackIndexMap.contains(addrB)) // not updated on failure
+    assert(!updatedLeader.ackIndexMap.contains(addrB))   // not updated on failure
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
@@ -172,7 +172,7 @@ class LeaderIndexTrackingSpec extends FunSuite {
 
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
-    
+
     // Should update tracking maps with candidate's last index
     assertEquals(updatedLeader.sentIndexMap(addrB), 4L)
     assertEquals(updatedLeader.ackIndexMap(addrB), 4L)
@@ -195,9 +195,9 @@ class LeaderIndexTrackingSpec extends FunSuite {
     val actions = leader.onReplicateLog(clusterConfig)
 
     assertEquals(actions.length, 2) // for addrB and addrC, not self
-    
+
     val replicateActions = actions.map(_.asInstanceOf[ReplicateLog])
-    val actionMap = replicateActions.map(a => a.peerId -> a).toMap
+    val actionMap        = replicateActions.map(a => a.peerId -> a).toMap
 
     assertEquals(actionMap(addrB).term, 2L)
     assertEquals(actionMap(addrB).prefixIndex, 5L)
@@ -216,9 +216,9 @@ class LeaderIndexTrackingSpec extends FunSuite {
     val actions = leader.onReplicateLog(clusterConfig)
 
     assertEquals(actions.length, 2)
-    
+
     val replicateActions = actions.map(_.asInstanceOf[ReplicateLog])
-    val actionMap = replicateActions.map(a => a.peerId -> a).toMap
+    val actionMap        = replicateActions.map(a => a.peerId -> a).toMap
 
     assertEquals(actionMap(addrB).prefixIndex, 5L)
     assertEquals(actionMap(addrC).prefixIndex, -1L) // default when missing

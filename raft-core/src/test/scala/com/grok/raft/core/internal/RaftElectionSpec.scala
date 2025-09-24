@@ -36,9 +36,9 @@ class TestRaft[F[_]: Async, T](
 
   override def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit] = fa >> Async[F].unit
 
-  val isRunning: Ref[F, Boolean]                                  = Ref.unsafe[F, Boolean](true)
-  override def setRunning(r: Boolean): F[Unit]                    = isRunning.set(r)
-  override def getRunning: F[Boolean]                             = isRunning.get
+  val isRunning: Ref[F, Boolean]               = Ref.unsafe[F, Boolean](true)
+  override def setRunning(r: Boolean): F[Unit] = isRunning.set(r)
+  override def getRunning: F[Boolean]          = isRunning.get
 
   val currentNodeRef: Ref[F, Node] = Ref.unsafe[F, Node](config.currentNode)
 
@@ -96,7 +96,7 @@ class RaftElectionSpec extends CatsEffectSuite {
 
       // 5) block until our announcer completes with a leader
       leaderAddress <- announcer.listen()
-      currentNode <- raft.currentNode
+      currentNode   <- raft.currentNode
     } yield {
       assert(
         currentNode.isInstanceOf[Leader],

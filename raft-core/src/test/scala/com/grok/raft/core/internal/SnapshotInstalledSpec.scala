@@ -11,7 +11,7 @@ class SnapshotInstalledSpec extends CatsEffectSuite {
     currentNode = TestData.leader,
     members = List(TestData.addr1, TestData.addr2, TestData.addr3)
   )
-  
+
   val logState = LogState(lastLogIndex = 4L, lastLogTerm = Some(2L), appliedLogIndex = 4L)
 
   test("Follower.onSnapshotInstalled should return positive acknowledgment") {
@@ -56,7 +56,7 @@ class SnapshotInstalledSpec extends CatsEffectSuite {
     val newFollower = newNode.asInstanceOf[Follower]
     assertEquals(newFollower.currentTerm, 3L)
     assertEquals(newFollower.address, TestData.addr3)
-    assertEquals(newFollower.currentLeader, None) // Will be set on next log request
+    assertEquals(newFollower.currentLeader, None)            // Will be set on next log request
     assertEquals(newFollower.votedFor, Some(TestData.addr3)) // Preserves vote from candidate state
 
     // Should return positive response
@@ -108,7 +108,7 @@ class SnapshotInstalledSpec extends CatsEffectSuite {
 
     nodes.foreach { node =>
       val (_, response) = node.onSnapshotInstalled(customLogState, clusterConfig)
-      
+
       assertEquals(response.currentTerm, 5L)
       assertEquals(response.ackLogIndex, customLogState.lastLogIndex)
       assertEquals(response.success, true)
@@ -118,7 +118,7 @@ class SnapshotInstalledSpec extends CatsEffectSuite {
 
   test("onSnapshotInstalled should work with empty log state") {
     val emptyLogState = LogState(lastLogIndex = -1L, lastLogTerm = None, appliedLogIndex = -1L)
-    val follower = TestData.follower1.copy(currentTerm = 1L)
+    val follower      = TestData.follower1.copy(currentTerm = 1L)
 
     val (_, response) = follower.onSnapshotInstalled(emptyLogState, clusterConfig)
 

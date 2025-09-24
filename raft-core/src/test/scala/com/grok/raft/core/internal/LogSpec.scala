@@ -7,9 +7,7 @@ import com.grok.raft.core.*
 import com.grok.raft.core.storage.Snapshot
 import munit.CatsEffectSuite
 
-
 class LogSpec extends CatsEffectSuite {
-
 
   var emptyDefer = new com.grok.raft.core.internal.RaftDeferred[IO, Unit] {
 
@@ -77,7 +75,7 @@ class LogSpec extends CatsEffectSuite {
         LogEntry(2, 2, NoOp),
         LogEntry(3, 3, NoOp)
       )
-      // 1 + 2 > 0 → keep both  
+      // 1 + 2 > 0 → keep both
       _ <- log.putEntries(newEntries, leaderPrevLogIndex = 1L, currentLogIndex = 0L)
 
       e2 <- store.get(2)
@@ -167,11 +165,11 @@ class LogSpec extends CatsEffectSuite {
   // Snapshot tests
   test("createSnapshot should capture current state and persist it") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
-      _ <- log.stateMachine.restoreSnapshot(5L, "test-state")
+      log    <- IO(new InMemoryLog[IO, String])
+      _      <- log.stateMachine.restoreSnapshot(5L, "test-state")
       config <- log.membershipManager.getClusterConfiguration
-      
-      snapshot <- log.createSnapshot(5L)
+
+      snapshot  <- log.createSnapshot(5L)
       retrieved <- log.snapshotStorage.retrieveSnapshot
     } yield {
       assertEquals(snapshot.lastIndex, 5L)
@@ -186,22 +184,22 @@ class LogSpec extends CatsEffectSuite {
     for {
       log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
-      
+
       // populate some log entries
       _ <- store.put(1, LogEntry(1, 1, NoOp))
       _ <- store.put(2, LogEntry(1, 2, NoOp))
       _ <- store.put(3, LogEntry(1, 3, NoOp))
-      
+
       config <- log.membershipManager.getClusterConfiguration
       snapshot = Snapshot(2L, "snapshot-state", config)
-      
+
       _ <- log.installSnapshot(snapshot)
-      
+
       // Check state was restored
-      state <- log.stateMachine.getCurrentState
+      state        <- log.stateMachine.getCurrentState
       appliedIndex <- log.stateMachine.appliedIndex
-      commitIndex <- log.getCommittedIndex
-      
+      commitIndex  <- log.getCommittedIndex
+
       // Check log was truncated
       e1 <- store.get(1)
       e2 <- store.get(2)
@@ -219,10 +217,10 @@ class LogSpec extends CatsEffectSuite {
   test("shouldCreateSnapshot should return true when logs exceed threshold") {
     for {
       log <- IO(new InMemoryLog[IO, String])
-      
+
       // Set applied index to simulate many logs since last snapshot
       _ <- log.stateMachine.restoreSnapshot(1500L, "state")
-      
+
       shouldCreate <- log.shouldCreateSnapshot()
     } yield {
       assertEquals(shouldCreate, true)
@@ -232,10 +230,10 @@ class LogSpec extends CatsEffectSuite {
   test("shouldCreateSnapshot should return false when logs are under threshold") {
     for {
       log <- IO(new InMemoryLog[IO, String])
-      
+
       // Set applied index to simulate few logs since last snapshot
       _ <- log.stateMachine.restoreSnapshot(100L, "state")
-      
+
       shouldCreate <- log.shouldCreateSnapshot()
     } yield {
       assertEquals(shouldCreate, false)
@@ -244,11 +242,11 @@ class LogSpec extends CatsEffectSuite {
 
   test("getSnapshotMetadata should return latest snapshot info") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log    <- IO(new InMemoryLog[IO, String])
       config <- log.membershipManager.getClusterConfiguration
       snapshot = Snapshot(10L, "meta-state", config)
-      
-      _ <- log.snapshotStorage.persistSnapshot(snapshot)
+
+      _        <- log.snapshotStorage.persistSnapshot(snapshot)
       metadata <- log.getSnapshotMetadata()
     } yield {
       assert(metadata.isDefined)
@@ -261,20 +259,20 @@ class LogSpec extends CatsEffectSuite {
     for {
       log <- IO(new InMemoryLog[IO, String])
       store = log.logStorage
-      
+
       // Set up state to trigger compaction
       _ <- log.stateMachine.restoreSnapshot(1500L, "compact-state")
-      
+
       // Add some log entries
       _ <- store.put(1498, LogEntry(1, 1498, NoOp))
       _ <- store.put(1499, LogEntry(1, 1499, NoOp))
       _ <- store.put(1500, LogEntry(1, 1500, NoOp))
-      
+
       _ <- log.compactLogs()
-      
+
       // Check snapshot was created
       snapshot <- log.snapshotStorage.retrieveSnapshot
-      
+
       // Check entries before applied index were deleted
       e1498 <- store.get(1498)
       e1500 <- store.get(1500)

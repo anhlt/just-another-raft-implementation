@@ -30,7 +30,7 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = entries,
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
+    val logState     = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
     val prevLogEntry = Some(LogEntry(1L, 2L, NoOp)) // consistent with prevLastLogTerm
 
     val (newNode, (response, actions)) = follower.onLogRequest(request, logState, prevLogEntry, clusterConfig)
@@ -60,7 +60,7 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = Nil, // empty entries (heartbeat)
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
+    val logState     = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
     val prevLogEntry = Some(LogEntry(1L, 2L, NoOp))
 
     val (_, (response, _)) = follower.onLogRequest(request, logState, prevLogEntry, clusterConfig)
@@ -79,7 +79,8 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = List(LogEntry(2L, 6L, NoOp)),
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L) // only 3 entries (indices 0,1,2)
+    val logState =
+      LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L) // only 3 entries (indices 0,1,2)
     val prevLogEntry = None // no entry at index 5
 
     val (newNode, (response, actions)) = follower.onLogRequest(request, logState, prevLogEntry, clusterConfig)
@@ -108,7 +109,7 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = List(LogEntry(2L, 3L, NoOp)),
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
+    val logState     = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
     val prevLogEntry = Some(LogEntry(1L, 2L, NoOp)) // term 1, but request expects term 3
 
     val (_, (response, _)) = follower.onLogRequest(request, logState, prevLogEntry, clusterConfig)
@@ -127,7 +128,7 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = List(LogEntry(2L, 0L, NoOp)),
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = -1L, lastLogTerm = None, appliedLogIndex = -1L) // empty log
+    val logState     = LogState(lastLogIndex = -1L, lastLogTerm = None, appliedLogIndex = -1L) // empty log
     val prevLogEntry = None
 
     val (_, (response, _)) = follower.onLogRequest(request, logState, prevLogEntry, clusterConfig)
@@ -146,16 +147,16 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = List(LogEntry(3L, 3L, NoOp)),
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
+    val logState     = LogState(lastLogIndex = 2L, lastLogTerm = Some(1L), appliedLogIndex = 2L)
     val prevLogEntry = Some(LogEntry(1L, 2L, NoOp))
 
     val (newNode, (response, actions)) = follower.onLogRequest(request, logState, prevLogEntry, clusterConfig)
 
     assertEquals(newNode, follower) // no state change
     assertEquals(response.success, false)
-    assertEquals(response.currentTerm, 5L) // follower's current term
+    assertEquals(response.currentTerm, 5L)                    // follower's current term
     assertEquals(response.ackLogIndex, logState.lastLogIndex) // current last log index
-    assertEquals(actions, List.empty[Action]) // no actions
+    assertEquals(actions, List.empty[Action])                 // no actions
   }
 
   test("Follower.onLogRequest should announce new leader when currentLeader changes") {
@@ -178,7 +179,10 @@ class FollowerIndexResponseSpec extends FunSuite {
 
     assertEquals(actions.length, 2)
     assertEquals(actions(0), StoreState)
-    assertEquals(actions(1), AnnounceLeader(leaderId = addrB, resetPrevious = true)) // resetPrevious = true because previous leader existed
+    assertEquals(
+      actions(1),
+      AnnounceLeader(leaderId = addrB, resetPrevious = true)
+    ) // resetPrevious = true because previous leader existed
   }
 
   test("Follower.onLogRequest should not announce leader when currentLeader stays the same") {
@@ -209,7 +213,7 @@ class FollowerIndexResponseSpec extends FunSuite {
       entries = List(LogEntry(3L, 2L, NoOp)),
       leaderCommit = 0L
     )
-    val logState = LogState(lastLogIndex = 1L, lastLogTerm = Some(1L), appliedLogIndex = 1L)
+    val logState     = LogState(lastLogIndex = 1L, lastLogTerm = Some(1L), appliedLogIndex = 1L)
     val prevLogEntry = Some(LogEntry(1L, 1L, NoOp))
 
     val (newNode, (response, actions)) = candidate.onLogRequest(request, logState, prevLogEntry, clusterConfig)
