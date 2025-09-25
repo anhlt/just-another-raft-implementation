@@ -17,7 +17,8 @@ import com.grok.raft.core.storage.Snapshot
 import com.grok.raft.core.storage.StateStorage
 import com.grok.raft.core.storage.PersistedState
 
-object NoOp extends ReadCommand[Unit]
+object NoOp extends ReadCommand[String, String, Unit]
+object NoOpUnit extends ReadCommand[Unit, Unit, Unit]
 
 object TestData {
 
@@ -52,15 +53,15 @@ class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
     ref.get.map(entries => if (entries.isEmpty) -1L else entries.keys.max)
 }
 
-class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F] {
+class InMemoryStateMachine[F[_]: Sync, K, V] extends StateMachine[F, K, V] {
   private val stateRef = Ref.unsafe[F, Array[Byte]]("test".getBytes("UTF-8"))
   private val indexRef = Ref.unsafe[F, Long](0L)
 
-  override def applyWrite: PartialFunction[(Long, WriteCommand[Option[Array[Byte]]]), F[Option[Array[Byte]]]] = { case (index, _) =>
-    indexRef.set(index) *> Sync[F].pure(Some("test".getBytes("UTF-8")))
+  override def applyWrite: PartialFunction[(Long, WriteCommand[K, V, Option[V]]), F[Option[V]]] = { case (index, _) =>
+    indexRef.set(index) *> Sync[F].pure(Some("test".getBytes("UTF-8")).asInstanceOf[Option[V]])
   }
 
-  override def applyRead[A]: PartialFunction[ReadCommand[A], F[A]] = { _ => Sync[F].pure(Some("test".getBytes("UTF-8")).asInstanceOf[A]) }
+  override def applyRead[A]: PartialFunction[ReadCommand[K, V, A], F[A]] = { _ => Sync[F].pure(Some("test".getBytes("UTF-8")).asInstanceOf[A]) }
 
   override def appliedIndex: F[Long] = indexRef.get
 
@@ -118,7 +119,9 @@ object StubLeaderAnnouncer {
 
 class StubRpcClient[F[_]: Sync](voteMap: Map[NodeAddress, Boolean]) extends RpcClient[F] {
 
-  override def send[T](serverId: NodeAddress, command: Command[T]): F[T] = ???
+  override def send[K, V, T](serverId: NodeAddress, command: ReadCommand[K, V, T]): F[T] = ???
+
+  override def send[K, V, T](serverId: NodeAddress, command: WriteCommand[K, V, T]): F[T] = ???
 
   override def join(serverId: NodeAddress, newNode: NodeAddress): F[Boolean] = ???
 
@@ -142,11 +145,11 @@ class DummyLogPropagator[F[_]: Sync] extends LogPropagator[F] {
     Sync[F].pure(LogRequestResponse(peer, term, prefixLength, success = true))
 }
 
-class InMemoryLog[F[_]: Sync, T] extends Log[F] {
+class InMemoryLog[F[_]: Sync, K, V] extends Log[F, K, V] {
   override val logStorage        = new InMemoryLogStorage[F]
   override val snapshotStorage   = new InMemorySnapshotStorage[F]
   override val membershipManager = new DummyMembershipManager[F]
-  override val stateMachine      = new InMemoryStateMachine[F, T]
+  override val stateMachine      = new InMemoryStateMachine[F, K, V]
 
   // identity transaction
   override def transactional[A](t: => F[A]): F[A] = t

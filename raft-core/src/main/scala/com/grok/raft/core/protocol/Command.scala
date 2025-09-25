@@ -1,6 +1,6 @@
 package com.grok.raft.core.protocol
 
-sealed trait Command[T]
+sealed trait Command[K, V, T]
 
-trait ReadCommand[T]  extends Command[T]
-trait WriteCommand[T] extends Command[T]
+trait ReadCommand[K, V, T]  extends Command[K, V, T]
+trait WriteCommand[K, V, T] extends Command[K, V, T]

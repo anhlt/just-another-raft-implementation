@@ -1,10 +1,10 @@
 package com.grok.raft.core.protocol
 
-// Key-Value write operations using Array[Byte] for keys and values
-case class Create(key: Array[Byte], value: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
+// Typed key-value write operations using TypedValue for keys and values
+case class Create[K, V](key: TypedValue[K], value: TypedValue[V]) extends WriteCommand[K, V, Option[V]]
 
-case class Update(key: Array[Byte], value: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
+case class Update[K, V](key: TypedValue[K], value: TypedValue[V]) extends WriteCommand[K, V, Option[V]]
 
-case class Delete(key: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
+case class Delete[K, V](key: TypedValue[K]) extends WriteCommand[K, V, Option[V]]
 
-case class Upsert(key: Array[Byte], value: Array[Byte]) extends WriteCommand[Option[Array[Byte]]]
+case class Upsert[K, V](key: TypedValue[K], value: TypedValue[V]) extends WriteCommand[K, V, Option[V]]

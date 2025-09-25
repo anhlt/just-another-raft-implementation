@@ -10,7 +10,7 @@ import scala.concurrent.duration.*
 import com.grok.raft.core.internal.RaftDeferred
 import com.grok.raft.core.storage.*
 
-trait Raft[F[_]] {
+trait Raft[F[_], K, V] {
 
   val config: ClusterConfiguration
 
@@ -20,7 +20,7 @@ trait Raft[F[_]] {
 
   val logPropagator: LogPropagator[F]
 
-  val log: Log[F]
+  val log: Log[F, K, V]
 
   val stateStorage: StateStorage[F]
 
@@ -201,8 +201,8 @@ trait Raft[F[_]] {
     }
   }
 
-  def onCommand[T](c: Command[T])(using MonadThrow[F], Logger[F]): F[T] = c match {
-    case cmd: ReadCommand[T] =>
+  def onCommand[T](c: Command[K, V, T])(using MonadThrow[F], Logger[F]): F[T] = c match {
+    case cmd: ReadCommand[K, V, T] =>
       for {
         node <- currentNode
         result <- node match
@@ -214,7 +214,7 @@ trait Raft[F[_]] {
             } yield rs
       } yield (result)
 
-    case cmd: WriteCommand[T] =>
+    case cmd: WriteCommand[K, V, T] =>
       for {
         deferred <- deferred[T]
         node     <- currentNode
@@ -248,7 +248,7 @@ trait Raft[F[_]] {
     * @return
     *   A wrapped effect that yields a list of actions to be performed after the command is processed.
     */
-  private def onWriteCommand[T](node: Node, cmd: WriteCommand[T], deferred: RaftDeferred[F, T])(using
+  private def onWriteCommand[T](node: Node, cmd: WriteCommand[K, V, T], deferred: RaftDeferred[F, T])(using
       MonadThrow[F],
       Logger[F]
   ): F[List[Action]] = {

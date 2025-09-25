@@ -21,7 +21,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("truncateInconsistencyLog deletes all entries > leaderPrevLogIndex when the last term mismatches") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
       // populate indices 0→term0, 1→term1, 2→term2
       _      <- store.put(0, LogEntry(0, 0, NoOp))
@@ -47,7 +47,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("truncateInconsistencyLog is a no‐op when there is no mismatch or entries is empty") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
       _      <- store.put(1, LogEntry(5, 1, NoOp))
       before <- store.lastIndex
@@ -62,7 +62,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("putEntries appends all new entries when leaderPrevLogIndex + entries.size > currentLogIndex") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
 
       // pre‐populate index 1
@@ -88,7 +88,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("putEntries does nothing when there are no new entries to append") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
 
       // pre‐populate two entries
@@ -106,7 +106,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("append should persist a LogEntry with the correct term and index") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       // start with an empty log; lastIndex == -1
       beforeLen <- log.logStorage.lastIndex
       _ = assertEquals(beforeLen, -1L)
@@ -134,7 +134,7 @@ class LogSpec extends CatsEffectSuite {
     // build a specialized TestLog whose membershipManager has quorum=2
 
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
 
       // populate two entries
@@ -165,7 +165,7 @@ class LogSpec extends CatsEffectSuite {
   // Snapshot tests
   test("createSnapshot should capture current state and persist it") {
     for {
-      log    <- IO(new InMemoryLog[IO, String])
+      log    <- IO(new InMemoryLog[IO, String, String])
       _      <- log.stateMachine.restoreSnapshot(5L, "test-state".getBytes("UTF-8"))
       config <- log.membershipManager.getClusterConfiguration
 
@@ -182,7 +182,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("installSnapshot should restore state and truncate log") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
 
       // populate some log entries
@@ -216,7 +216,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("shouldCreateSnapshot should return true when logs exceed threshold") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
 
       // Set applied index to simulate many logs since last snapshot
       _ <- log.stateMachine.restoreSnapshot(1500L, "state".getBytes("UTF-8"))
@@ -229,7 +229,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("shouldCreateSnapshot should return false when logs are under threshold") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
 
       // Set applied index to simulate few logs since last snapshot
       _ <- log.stateMachine.restoreSnapshot(100L, "state".getBytes("UTF-8"))
@@ -242,7 +242,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("getSnapshotMetadata should return latest snapshot info") {
     for {
-      log    <- IO(new InMemoryLog[IO, String])
+      log    <- IO(new InMemoryLog[IO, String, String])
       config <- log.membershipManager.getClusterConfiguration
       snapshot = Snapshot(10L, "meta-state".getBytes("UTF-8"), config)
 
@@ -257,7 +257,7 @@ class LogSpec extends CatsEffectSuite {
 
   test("compactLogs should create snapshot and delete old entries when threshold is met") {
     for {
-      log <- IO(new InMemoryLog[IO, String])
+      log <- IO(new InMemoryLog[IO, String, String])
       store = log.logStorage
 
       // Set up state to trigger compaction

@@ -1,10 +1,10 @@
 package com.grok.raft.core.protocol
 
-// Key-Value read operations using Array[Byte] for keys and values
-case class Get(key: Array[Byte]) extends ReadCommand[Option[Array[Byte]]]
+// Typed key-value read operations using TypedValue for keys and values
+case class Get[K, V](key: TypedValue[K]) extends ReadCommand[K, V, Option[V]]
 
-case class Scan(startKey: Array[Byte], limit: Int) extends ReadCommand[List[Array[Byte]]]
+case class Scan[K, V](startKey: TypedValue[K], limit: Int) extends ReadCommand[K, V, List[V]]
 
-case class Range(startKey: Array[Byte], endKey: Array[Byte]) extends ReadCommand[List[Array[Byte]]]
+case class Range[K, V](startKey: TypedValue[K], endKey: TypedValue[K]) extends ReadCommand[K, V, List[V]]
 
-case class Keys(prefix: Option[Array[Byte]] = None) extends ReadCommand[List[Array[Byte]]]
+case class Keys[K, V](prefix: Option[TypedValue[K]] = None) extends ReadCommand[K, V, List[K]]

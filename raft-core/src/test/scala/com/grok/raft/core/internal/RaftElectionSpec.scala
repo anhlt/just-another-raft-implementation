@@ -14,10 +14,10 @@ class TestRaft[F[_]: Async, T](
     override val leaderAnnouncer: LeaderAnnouncer[F],
     override val membershipManager: MembershipManager[F],
     override val logPropagator: LogPropagator[F],
-    override val log: Log[F],
+    override val log: Log[F, String, String],
     override val stateStorage: StateStorage[F],
     override val rpcClient: RpcClient[F]
-) extends Raft[F] {
+) extends Raft[F, String, String] {
 
   override def deferred[A]: F[RaftDeferred[F, A]] = {
 
@@ -86,7 +86,7 @@ class RaftElectionSpec extends CatsEffectSuite {
         leaderAnnouncer = announcer,
         membershipManager = new DummyMembershipManager[IO],
         logPropagator = new DummyLogPropagator[IO],
-        log = new InMemoryLog[IO, String],
+        log = new InMemoryLog[IO, String, String],
         stateStorage = new InMemoryStateStorage[IO],
         rpcClient = rpcClient
       )

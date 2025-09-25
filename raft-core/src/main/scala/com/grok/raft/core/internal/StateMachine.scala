@@ -17,20 +17,21 @@ import com.grok.raft.core.protocol.*
   * While often implemented as a key-value store, the state machine can be any application that requires distributed
   * consensus, as long as it behaves deterministically when processing the same sequence of commands.
   *
-  * This simplified version works with raw bytes to eliminate type parameter complexity:
-  *   - Write operations work with byte arrays and return Option[Array[Byte]]
-  *   - Read operations can return different types:
-  *     - Get/Scan operations return Option[Array[Byte]]
-  *     - Range operations return List[Array[Byte]]
-  *     - Keys operations return List[Array[Byte]]
-  *   - Internal state is maintained as Array[Byte]
+  * This type-aware version supports typed operations:
+  *   - Write operations work with key-value pairs of types K, V
+  *   - Read operations can return different types based on the operation
+  *   - Internal state serialization is handled via Array[Byte] for snapshots
   *
   * @tparam F
   *   The effect type for state machine operations
+  * @tparam K
+  *   The key type for the state machine
+  * @tparam V
+  *   The value type for the state machine
   */
-trait StateMachine[F[_]]:
-  def applyWrite: PartialFunction[(Long, WriteCommand[Option[Array[Byte]]]), F[Option[Array[Byte]]]]
-  def applyRead[A]: PartialFunction[ReadCommand[A], F[A]]
+trait StateMachine[F[_], K, V]:
+  def applyWrite: PartialFunction[(Long, WriteCommand[K, V, Option[V]]), F[Option[V]]]
+  def applyRead[A]: PartialFunction[ReadCommand[K, V, A], F[A]]
   def appliedIndex: F[Long]
   def restoreSnapshot(lastIndex: Long, data: Array[Byte]): F[Unit]
   def getCurrentState: F[Array[Byte]]

@@ -13,7 +13,7 @@ import org.typelevel.log4cats.syntax.*
 
 import scala.collection.concurrent.TrieMap
 
-trait Log[F[_]]:
+trait Log[F[_], K, V]:
 
   val logStorage: LogStorage[F]
 
@@ -25,7 +25,7 @@ trait Log[F[_]]:
 
   def transactional[A](t: => F[A]): F[A]
 
-  val stateMachine: StateMachine[F]
+  val stateMachine: StateMachine[F, K, V]
 
   def initialize(using
       MonadThrow[F],
@@ -189,7 +189,7 @@ trait Log[F[_]]:
       } yield committed.nonEmpty
     }
 
-  def append[T](term: Long, command: Command[T], deferred: RaftDeferred[F, T])(using
+  def append[T](term: Long, command: Command[K, V, T], deferred: RaftDeferred[F, T])(using
       MonadThrow[F],
       Logger[F]
   ): F[LogEntry] =
@@ -253,21 +253,21 @@ trait Log[F[_]]:
         case None        => MonadThrow[F].raiseError(LogError("Log entry not found for commit."))
       }
       _ <- trace"Committing log entry: ${logEntry}"
-      _ <- applyCommand(logEntry.get.index, logEntry.get.command)
+      _ <- applyCommand(logEntry.get.index, logEntry.get.command.asInstanceOf[Command[K, V, ?]])
       _ <- setCommitIndex(logEntry.get.index)
       _ <- trace"Log entry committed: ${logEntry}"
     } yield ()
   }
 
-  def applyCommand(index: Long, command: Command[?])(using MonadThrow[F]): F[Unit] = {
+  def applyCommand(index: Long, command: Command[K, V, ?])(using MonadThrow[F]): F[Unit] = {
     val output: F[Any] = command match {
 
-      case command: ReadCommand[_] =>
+      case command: ReadCommand[K, V, _] =>
         stateMachine.applyRead.apply(command).asInstanceOf[F[Any]]
 
-      case command: WriteCommand[_] =>
+      case command: WriteCommand[K, V, _] =>
         stateMachine.applyWrite
-          .apply((index, command.asInstanceOf[WriteCommand[Option[Array[Byte]]]]))
+          .apply((index, command.asInstanceOf[WriteCommand[K, V, Option[V]]]))
           .asInstanceOf[F[Any]]
     }
 
@@ -279,7 +279,7 @@ trait Log[F[_]]:
     )
   }
 
-  def applyReadCommand[A](command: ReadCommand[A]): F[A] =
+  def applyReadCommand[A](command: ReadCommand[K, V, A]): F[A] =
     stateMachine.applyRead.apply(command)
 
   def compactLogs()(using MonadThrow[F], Logger[F]): F[Unit] = {

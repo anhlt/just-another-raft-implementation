@@ -122,7 +122,7 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
         prevSentLogIndex = 4L,
         prevLastLogTerm = 2L,
         leaderCommit = 0L,
-        entries = List(LogEntry(2L, 5L, NoOp))
+        entries = List(LogEntry(2L, 5L, NoOpUnit))
       ),
       LogRequest(
         addrB,
@@ -130,7 +130,7 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
         prevSentLogIndex = 5L,
         prevLastLogTerm = 2L,
         leaderCommit = 0L,
-        entries = List(LogEntry(2L, 6L, NoOp))
+        entries = List(LogEntry(2L, 6L, NoOpUnit))
       ),
       LogRequest(
         addrB,
@@ -138,7 +138,7 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
         prevSentLogIndex = 6L,
         prevLastLogTerm = 2L,
         leaderCommit = 0L,
-        entries = List(LogEntry(2L, 7L, NoOp))
+        entries = List(LogEntry(2L, 7L, NoOpUnit))
       )
     )
 
@@ -147,7 +147,7 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
 
     for ((request, idx) <- requests.zipWithIndex) {
       val prevEntry = if (request.prevSentLogIndex >= 0) {
-        Some(LogEntry(request.prevLastLogTerm, request.prevSentLogIndex, NoOp))
+        Some(LogEntry(request.prevLastLogTerm, request.prevSentLogIndex, NoOpUnit))
       } else None
 
       val (newState, (response, _)) = currentFollower.onLogRequest(request, currentLogState, prevEntry, clusterConfig)
@@ -199,7 +199,7 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
       term = 2L,
       prevSentLogIndex = 1000000L, // much larger than follower's log
       prevLastLogTerm = 2L,
-      entries = List(LogEntry(2L, 1000001L, NoOp)),
+      entries = List(LogEntry(2L, 1000001L, NoOpUnit)),
       leaderCommit = 0L
     )
 
@@ -218,15 +218,15 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
 
   test("Log should handle commit progression with gaps in acknowledgments") {
     for {
-      log <- IO(new InMemoryLog[IO, Unit])
+      log <- IO(new InMemoryLog[IO, Unit, Unit])
       store = log.logStorage
 
       // Pre-populate with entries
-      _ <- store.put(0, LogEntry(1, 0, NoOp))
-      _ <- store.put(1, LogEntry(1, 1, NoOp))
-      _ <- store.put(2, LogEntry(2, 2, NoOp))
-      _ <- store.put(3, LogEntry(2, 3, NoOp))
-      _ <- store.put(4, LogEntry(2, 4, NoOp))
+      _ <- store.put(0, LogEntry(1, 0, NoOpUnit))
+      _ <- store.put(1, LogEntry(1, 1, NoOpUnit))
+      _ <- store.put(2, LogEntry(2, 2, NoOpUnit))
+      _ <- store.put(3, LogEntry(2, 3, NoOpUnit))
+      _ <- store.put(4, LogEntry(2, 4, NoOpUnit))
 
       _ <- log.setCommitIndex(-1L)
 

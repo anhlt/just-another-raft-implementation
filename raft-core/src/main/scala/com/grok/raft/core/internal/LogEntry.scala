@@ -6,8 +6,8 @@ import com.grok.raft.core.protocol._
 trait LogEntryI {
   val term: Long
   val index: Long
-  val command: Command[?]
+  val command: Command[?, ?, ?]
   def position: Long = index + 1
 }
 
-case class LogEntry(term: Long, index: Long, command: Command[?]) extends LogEntryI
+case class LogEntry(term: Long, index: Long, command: Command[?, ?, ?]) extends LogEntryI

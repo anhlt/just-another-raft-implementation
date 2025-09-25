@@ -21,7 +21,14 @@ object KeyValueRaft:
     for {
       // Create state machine
       appliedIndexRef <- Ref.of[F, Long](0L)
-      stateMachine = new KeyValueStateMachine[F](storage, appliedIndexRef)
+      keySerializer   = TypedSerializer.forType(StringType)
+      valueSerializer = TypedSerializer.forType(StringType)
+      stateMachine = new KeyValueStateMachine[F, String, String](
+        storage,
+        appliedIndexRef,
+        keySerializer,
+        valueSerializer
+      )
 
       _ <- trace"KeyValue Raft components initialized"
     } yield new KeyValueRaft[F](stateMachine, storage)
@@ -29,7 +36,7 @@ object KeyValueRaft:
 /** A simplified Raft-based distributed key-value store.
   */
 class KeyValueRaft[F[_]: MonadThrow: Logger](
-    private val stateMachine: KeyValueStateMachine[F],
+    private val stateMachine: KeyValueStateMachine[F, String, String],
     private val storage: KeyValueStorage[F]
 ):
 
@@ -38,9 +45,9 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
   def put(key: String, value: String): F[Option[String]] =
     for {
       _      <- trace"KV Put: $key -> $value"
-      result <- stateMachine.applyWrite.apply((0L, Upsert(key.getBytes("UTF-8"), value.getBytes("UTF-8"))))
+      result <- stateMachine.applyWrite.apply((0L, Upsert(TypedValue(key, StringType), TypedValue(value, StringType))))
       _      <- trace"KV Put completed: $result"
-    } yield result.map(bytes => new String(bytes, "UTF-8"))
+    } yield result
 
   /** Retrieve a value by key (can bypass consensus for reads).
     */
@@ -56,9 +63,9 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
       // Go through state machine
       for {
         _      <- trace"KV Get (consensus): $key"
-        result <- stateMachine.applyRead.apply(Get(key.getBytes("UTF-8")))
+        result <- stateMachine.applyRead.apply(Get(TypedValue(key, StringType)))
         _      <- trace"KV Get (consensus) completed: $result"
-      } yield result.map(bytes => new String(bytes, "UTF-8"))
+      } yield result
     }
 
   /** Remove a key-value pair (goes through Raft consensus).
@@ -66,9 +73,9 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
   def delete(key: String): F[Option[String]] =
     for {
       _      <- trace"KV Delete: $key"
-      result <- stateMachine.applyWrite.apply((0L, Delete(key.getBytes("UTF-8"))))
+      result <- stateMachine.applyWrite.apply((0L, Delete[String, String](TypedValue(key, StringType))))
       _      <- trace"KV Delete completed: $result"
-    } yield result.map(bytes => new String(bytes, "UTF-8"))
+    } yield result
 
   /** Scan multiple entries starting from a key.
     */
@@ -79,16 +86,16 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
         _          <- trace"KV Scan (bypass): $startKey, limit=$limit"
         scanResult <- storage.scan(startKey)
         limitedResults = scanResult.take(limit)
-        result = limitedResults.map { case (k, v) => s"$k:$v" }.toList
+        result         = limitedResults.map { case (_, v) => v }.toList
         _ <- trace"KV Scan (bypass) completed: $result"
       } yield result
     } else {
       // Go through state machine
       for {
         _      <- trace"KV Scan (consensus): $startKey, limit=$limit"
-        result <- stateMachine.applyRead.apply(Scan(startKey.getBytes("UTF-8"), limit))
+        result <- stateMachine.applyRead.apply(Scan(TypedValue(startKey, StringType), limit))
         _      <- trace"KV Scan (consensus) completed: $result"
-      } yield result.map(bytes => new String(bytes, "UTF-8"))
+      } yield result
     }
 
   /** Get a range of values between two keys.
@@ -106,9 +113,9 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
       // Go through state machine
       for {
         _      <- trace"KV Range (consensus): $startKey to $endKey"
-        result <- stateMachine.applyRead.apply(Range(startKey.getBytes("UTF-8"), endKey.getBytes("UTF-8")))
+        result <- stateMachine.applyRead.apply(Range(TypedValue(startKey, StringType), TypedValue(endKey, StringType)))
         _      <- trace"KV Range (consensus) completed: $result"
-      } yield result.map(bytes => new String(bytes, "UTF-8"))
+      } yield result
     }
 
   /** Get all keys with optional prefix filtering.
@@ -136,9 +143,9 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
       // Go through state machine
       for {
         _      <- trace"KV Keys (consensus): prefix=$prefix"
-        result <- stateMachine.applyRead.apply(Keys(prefix.map(_.getBytes("UTF-8"))))
+        result <- stateMachine.applyRead.apply(Keys(prefix.map(p => TypedValue(p, StringType))))
         _      <- trace"KV Keys (consensus) completed: $result"
-      } yield result.map(bytes => new String(bytes, "UTF-8"))
+      } yield result
     }
 
   /** Stop the system and close resources.
@@ -152,4 +159,4 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
 
   /** Get the state machine for advanced operations.
     */
-  def getStateMachine: KeyValueStateMachine[F] = stateMachine
+  def getStateMachine: KeyValueStateMachine[F, String, String] = stateMachine
