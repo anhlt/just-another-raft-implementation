@@ -72,17 +72,14 @@ class KeyValueRaft[F[_]: MonadThrow: Logger](
 
   /** Scan multiple entries starting from a key.
     */
-  def scan(startKey: String, limit: Int, bypassConsensus: Boolean = false): F[Option[String]] =
+  def scan(startKey: String, limit: Int, bypassConsensus: Boolean = false): F[List[String]] =
     if (bypassConsensus) {
       // Direct scan from local storage
       for {
         _          <- trace"KV Scan (bypass): $startKey, limit=$limit"
         scanResult <- storage.scan(startKey)
         limitedResults = scanResult.take(limit)
-        result =
-          if (limitedResults.nonEmpty) {
-            Some(limitedResults.map { case (k, v) => s"$k:$v" }.mkString(","))
-          } else None
+        result = limitedResults.map { case (k, v) => s"$k:$v" }.toList
         _ <- trace"KV Scan (bypass) completed: $result"
       } yield result
     } else {

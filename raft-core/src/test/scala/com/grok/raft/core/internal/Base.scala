@@ -53,7 +53,7 @@ class InMemoryLogStorage[F[_]: Sync] extends LogStorage[F] {
 }
 
 class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F] {
-  private val stateRef = Ref.unsafe[F, T](null.asInstanceOf[T])
+  private val stateRef = Ref.unsafe[F, Array[Byte]]("test".getBytes("UTF-8"))
   private val indexRef = Ref.unsafe[F, Long](0L)
 
   override def applyWrite: PartialFunction[(Long, WriteCommand[Option[Array[Byte]]]), F[Option[Array[Byte]]]] = { case (index, _) =>
@@ -65,9 +65,9 @@ class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F] {
   override def appliedIndex: F[Long] = indexRef.get
 
   override def restoreSnapshot(lastIndex: Long, data: Array[Byte]): F[Unit] =
-    indexRef.set(lastIndex)
+    indexRef.set(lastIndex) *> stateRef.set(data)
 
-  override def getCurrentState: F[Array[Byte]] = Sync[F].pure("test".getBytes("UTF-8"))
+  override def getCurrentState: F[Array[Byte]] = stateRef.get
 }
 
 class DummyMembershipManager[F[_]: Sync] extends MembershipManager[F]:

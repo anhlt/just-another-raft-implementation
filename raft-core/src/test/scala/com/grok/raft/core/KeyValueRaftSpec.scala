@@ -142,9 +142,9 @@ class KeyValueRaftSpec extends CatsEffectSuite {
 
       // Test scan operation with bypass consensus
       scanResult <- kvRaft.scan("user:", 3, bypassConsensus = true)
-      _ = assert(scanResult.isDefined, "Scan should return results")
-      _ = assert(scanResult.get.contains("user:123"), s"Should contain user:123, got: ${scanResult.get}")
-      _ = assert(scanResult.get.contains("user:124"), s"Should contain user:124, got: ${scanResult.get}")
+      _ = assert(scanResult.nonEmpty, "Scan should return results")
+      _ = assert(scanResult.exists(_.contains("user:123")), s"Should contain user:123, got: $scanResult")
+      _ = assert(scanResult.exists(_.contains("user:124")), s"Should contain user:124, got: $scanResult")
 
       // Test keys operation with prefix
       keysResult <- kvRaft.keys(Some("user:"), bypassConsensus = true)
@@ -254,7 +254,7 @@ class KeyValueRaftSpec extends CatsEffectSuite {
 
       // Test scan with no results (prefix that doesn't exist and is lexicographically after all keys)
       noResultsScan <- kvRaft.scan("zzz-nonexistent:prefix:", 10, bypassConsensus = true)
-      _ = assertEquals(noResultsScan, None)
+      _ = assertEquals(noResultsScan, List.empty[String])
 
       // Test keys with no results
       noResultsKeys <- kvRaft.keys(Some("zzz-nonexistent:prefix:"), bypassConsensus = true)
@@ -262,7 +262,7 @@ class KeyValueRaftSpec extends CatsEffectSuite {
 
       // Test scan with limit 0 (should return no results)
       zeroLimitScan <- kvRaft.scan("", 0, bypassConsensus = true)
-      _ = assertEquals(zeroLimitScan, None)
+      _ = assertEquals(zeroLimitScan, List.empty[String])
 
       // Test very long key and value
       longKey   = "very-long-key-" + "x" * 1000

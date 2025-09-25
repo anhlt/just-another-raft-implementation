@@ -8,12 +8,18 @@
 - **Format check**: `sbt scalafmtCheck`
 
 ## Code Style & Conventions
+- **Language**: Strictly English only - never use emojis or non-English characters in code, comments, or documentation
 - **Scala version**: 3.7.3 with tpolecat compiler flags
 - **Max line length**: 120 characters
 - **Formatting**: Use scalafmt with `align.preset = more`
 - **Imports**: Group external imports first, then internal `com.grok.raft` imports
 - **Package structure**: `com.grok.raft.{core|effects}`
-- **Functional Programming**: Always use immutable variables (`val`), never mutable (`var`)
+- **Functional Programming**: 
+  - Always use immutable variables (`val`), never mutable (`var`)
+  - Prefer functional constructs over imperative styles
+  - Avoid `if-else` statements - use pattern matching, `Option.fold`, `Either.fold`, or conditional expressions instead
+  - Use `map`, `flatMap`, `traverse`, `sequence` instead of loops
+  - Prefer expressions over statements
 - **Data structures**: Prefer immutable collections (List, Map, Set) over mutable alternatives
 - **State management**: Use immutable case classes with functional updates via `copy()`
 - **Side effects**: Encapsulate all side effects in `F[_]` monads (IO, etc.)
