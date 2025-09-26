@@ -17,6 +17,7 @@ val commonSettings = Seq(
     Dependencies.catsEffectKernel.value,
     // standard "effect" library (Queues, Console, Random etc.)
     Dependencies.catsEffectStd.value,
+    Dependencies.catsMtl.value,
     Dependencies.log4CatsCore.value,
     Dependencies.log4CatsLog4j.value,
     Dependencies.logback.value,

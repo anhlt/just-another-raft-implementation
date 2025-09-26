@@ -1,6 +1,7 @@
 package com.grok.raft.core.internal
 
 import cats.*
+import cats.mtl.Raise
 import cats.implicits.*
 import cats.syntax.all.*
 import com.grok.raft.core.*
@@ -27,9 +28,33 @@ trait Log[F[_], T]:
 
   val stateMachine: StateMachine[F, T]
 
+  // MTL-based error handling helper methods for Log operations
+  protected def entryNotFound[A](index: Long)(using Raise[F, LogError]): F[A] = 
+    LogError.EntryNotFound(index).raise[F, A]
+    
+  protected def indexOutOfBounds[A](index: Long, logLength: Long)(using Raise[F, LogError]): F[A] = 
+    LogError.IndexOutOfBounds(index, logLength).raise[F, A]
+    
+  protected def termMismatch[A](expected: Long, actual: Long)(using Raise[F, LogError]): F[A] = 
+    LogError.TermMismatch(expected, actual).raise[F, A]
+    
+  protected def commitIndexLagging[A](commitIndex: Long, lastIndex: Long)(using Raise[F, LogError]): F[A] = 
+    LogError.CommitIndexLagging(commitIndex, lastIndex).raise[F, A]
+
+  def restoreSnapshot[T](snapshot: Snapshot[T])(using Monad[F], Raise[F, LogError], Logger[F]): F[Unit] = {
+    for {
+      _ <- trace"Restoring snapshot with last included index: ${snapshot.lastIndex}"
+      _ <- membershipManager.setClusterConfiguration(snapshot.config)
+      _ <- stateMachine.restoreSnapshot(snapshot.lastIndex, snapshot.data)
+      _ <- setCommitIndex(snapshot.lastIndex)
+      _ <- trace"Snapshot restored successfully"
+    } yield ()
+  }
+
 
   def initialize(using
-      MonadThrow[F],
+      Monad[F],
+      Raise[F, LogError],
       Logger[F]
   ): F[Unit] =
     for {
@@ -176,7 +201,8 @@ trait Log[F[_], T]:
     *   Matching Property by rejecting or truncating inconsistent logs.
     */
   def appendEntries(entries: List[LogEntry], leaderPrevLogIndex: Long, leaderCommit: Long)(using
-      MonadThrow[F],
+      Monad[F],
+      Raise[F, LogError],
       Logger[F]
   ): F[Boolean] =
     transactional {
@@ -191,7 +217,7 @@ trait Log[F[_], T]:
       } yield committed.nonEmpty
     }
 
-  def append[T](term: Long, command: Command, deferred: RaftDeferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
+  def append[T](term: Long, command: Command, deferred: RaftDeferred[F, T])(using Monad[F], Raise[F, LogError], Logger[F]): F[LogEntry] =
     transactional {
       for {
         lastIndex <- logStorage.lastIndex
@@ -216,7 +242,7 @@ trait Log[F[_], T]:
     * @return
     *   A wrapped boolean value indicating whether any new entries were committed (true) or not (false)
     */
-  def commitLogs(ackIndexMap: Map[NodeAddress, Long])(using MonadThrow[F], Logger[F]): F[Boolean] = {
+  def commitLogs(ackIndexMap: Map[NodeAddress, Long])(using Monad[F], Raise[F, LogError], Logger[F]): F[Boolean] = {
     for {
       lastLogIndex   <- logStorage.lastIndex
       commitedIndex  <- getCommittedIndex
@@ -229,7 +255,8 @@ trait Log[F[_], T]:
   }
 
   def commitIfMatch(ackedIndexMap: Map[NodeAddress, Long], index: Long)(using
-      MonadThrow[F],
+      Monad[F],
+      Raise[F, LogError],
       Logger[F]
   ): F[Boolean] = {
     for {
@@ -241,24 +268,25 @@ trait Log[F[_], T]:
   }
 
   def commitLog(index: Long)(using
-      MonadThrow[F],
-      Logger[F]
+    Monad[F],
+    Raise[F, LogError],
+    Logger[F]
   ): F[Unit] = {
     for {
       _ <- trace"Attempting to commit log entry at index: ${index}"
       logEntry <- logStorage.get(index)
-      _        <- logEntry match {
-        case Some(entry) => Monad[F].pure(entry)
-        case None        => MonadThrow[F].raiseError(LogError("Log entry not found for commit."))
+      entry <- logEntry match {
+        case Some(entry) => entry.pure[F]
+        case None        => entryNotFound(index)
       }
-      _        <- trace"Committing log entry: ${logEntry}"
-      _        <- applyCommand(logEntry.get.index, logEntry.get.command)
-      _        <- setCommitIndex(logEntry.get.index)
-      _        <- trace"Log entry committed: ${logEntry}"
+      _        <- trace"Committing log entry: ${entry}"
+      _        <- applyCommand(entry.index, entry.command)
+      _        <- setCommitIndex(entry.index)
+      _        <- trace"Log entry committed: ${entry}"
     } yield ()
   }
 
-  def applyCommand(index: Long, command: Command)(using MonadThrow[F]): F[Unit] = {
+  def applyCommand(index: Long, command: Command)(using Monad[F], Raise[F, LogError]): F[Unit] = {
     val output = command match {
 
       case command: ReadCommand[_] =>
@@ -276,10 +304,10 @@ trait Log[F[_], T]:
     )
   }
 
-  def applyReadCommand[T](command: ReadCommand[?])(using MonadThrow[F]): F[T] =
+  def applyReadCommand[T](command: ReadCommand[?])(using Monad[F], Raise[F, LogError]): F[T] =
     stateMachine.applyRead.apply(command).asInstanceOf[F[T]]
 
-  def compactLogs()(using MonadThrow[F], Logger[F]): F[Unit] = {
+  def compactLogs()(using Monad[F], Raise[F, LogError], Logger[F]): F[Unit] = {
     for {
       appliedIndex <- stateMachine.appliedIndex
       shouldCompact <- shouldCreateSnapshot()
@@ -294,7 +322,7 @@ trait Log[F[_], T]:
     } yield ()
   }
 
-  def createSnapshot(lastIndex: Long)(using MonadThrow[F], Logger[F]): F[Snapshot[T]] = {
+  def createSnapshot(lastIndex: Long)(using Monad[F], Raise[F, LogError], Logger[F]): F[Snapshot[T]] = {
     for {
       _ <- trace"Creating snapshot up to index: $lastIndex"
       currentState <- stateMachine.getCurrentState
@@ -315,7 +343,7 @@ trait Log[F[_], T]:
     } yield logsSinceSnapshot > 1000
   }
 
-  def installSnapshot(snapshot: Snapshot[T])(using MonadThrow[F], Logger[F]): F[Unit] = {
+  def installSnapshot(snapshot: Snapshot[T])(using Monad[F], Raise[F, LogError], Logger[F]): F[Unit] = {
     transactional {
       for {
         _ <- trace"Installing snapshot with last index: ${snapshot.lastIndex}"
@@ -333,15 +361,3 @@ trait Log[F[_], T]:
       snapshot <- snapshotStorage.retrieveSnapshot
     } yield snapshot.map(s => (s.lastIndex, s.config))
   } 
-
-  def restoreSnapshot[T](snapshot: Snapshot[T])(using
-      Monad[F],
-      Logger[F]
-  ): F[Unit] = 
-    for {
-      _ <- trace"Restoring snapshot with last index: ${snapshot.lastIndex}"
-      _ <- membershipManager.setClusterConfiguration(snapshot.config)
-      _ <- stateMachine.restoreSnapshot(snapshot.lastIndex, snapshot.data)
-      _ <- setCommitIndex(snapshot.lastIndex)
-      _ <- trace"Snapshot restored successfully"
-    } yield ()

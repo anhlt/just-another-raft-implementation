@@ -5,6 +5,8 @@ import munit.CatsEffectSuite
 import com.grok.raft.core.protocol.*
 
 class KVStateMachineSpec extends CatsEffectSuite {
+  // Import MTL test utilities
+  import MtlTestUtils.given
 
   test("InMemoryKVStateMachine should handle basic put/get operations") {
     val kvStore = new InMemoryKVStateMachine[IO]

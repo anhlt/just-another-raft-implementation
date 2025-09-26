@@ -4,11 +4,14 @@ import cats.effect.*
 import cats.effect.kernel.*
 import cats.implicits.*
 import cats.*
+import cats.mtl.{Handle, Raise}
 
 // Bring your domain types into scope
 import com.grok.raft.core.internal.storage.LogStorage
 import com.grok.raft.core.internal.*
 import com.grok.raft.core.*
+import com.grok.raft.core.error.{StateMachineError, LogError, RaftError}
+
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import com.grok.raft.core.protocol.*
@@ -20,6 +23,126 @@ import scala.collection.immutable.TreeMap
 import java.util.Arrays
 
 object NoOp extends ReadCommand[Unit]
+
+// MTL Test Utilities - Provides error handling capabilities for tests
+object MtlTestUtils {
+
+
+  // Helper to run operations that can raise LogError
+  def withLogErrorHandling[A](operation: IO[A]): IO[A] = 
+    Handle.allow[LogError](operation).rescue {
+      case LogError.EntryNotFound(index) => 
+        IO.raiseError(new RuntimeException(s"Log entry not found at index $index"))
+      case LogError.IndexOutOfBounds(index, length) =>
+        IO.raiseError(new RuntimeException(s"Index $index out of bounds (length: $length)"))
+      case LogError.CommitIndexLagging(commitIndex, lastIndex) =>
+        IO.raiseError(new RuntimeException(s"Commit index $commitIndex lagging behind last index $lastIndex"))
+      case error => 
+        IO.raiseError(new RuntimeException(s"Log error: $error"))
+    }
+
+  // Helper to run operations that can raise StateMachineError  
+  def withStateMachineErrorHandling[A](operation: IO[A]): IO[A] =
+    Handle.allow[StateMachineError](operation).rescue {
+      case StateMachineError.InvalidCommand(commandType) =>
+        IO.raiseError(new RuntimeException(s"Invalid command: $commandType"))
+      case StateMachineError.OperationFailed(operation, reason) =>
+        IO.raiseError(new RuntimeException(s"Operation $operation failed: $reason"))
+      case StateMachineError.StateCorruption(details) =>
+        IO.raiseError(new RuntimeException(s"State corruption: $details"))
+      case StateMachineError.ApplyCommandFailed(index, command) =>
+        IO.raiseError(new RuntimeException(s"Apply command failed at index $index: $command"))
+    }
+
+  // Helper to run operations that can raise RaftError
+  def withRaftErrorHandling[A](operation: IO[A]): IO[A] =
+    Handle.allow[RaftError](operation).rescue {
+      case RaftError.NotLeader(leader) =>
+        IO.raiseError(new RuntimeException(s"Not leader: $leader"))
+      case RaftError.ElectionTimeout =>
+        IO.raiseError(new RuntimeException("Election timeout"))
+      case RaftError.InvalidTerm(current, requested) =>
+        IO.raiseError(new RuntimeException(s"Invalid term: current=$current, requested=$requested"))
+      case error =>
+        IO.raiseError(new RuntimeException(s"Raft error: $error"))
+    }
+
+  // Combined error handling for operations that can raise multiple error types
+  def withAllErrorHandling[A](operation: IO[A]): IO[A] =
+    Handle.allow[RaftError] {
+      Handle.allow[LogError] {
+        Handle.allow[StateMachineError](operation)
+        .rescue {
+          case StateMachineError.InvalidCommand(commandType) =>
+            IO.raiseError(new RuntimeException(s"Invalid command: $commandType"))
+          case error => 
+            IO.raiseError(new RuntimeException(s"State machine error: $error"))
+        }
+      }.rescue {
+        case LogError.EntryNotFound(index) =>
+          IO.raiseError(new RuntimeException(s"Log entry not found at index $index"))
+        case error => 
+          IO.raiseError(new RuntimeException(s"Log error: $error"))
+      }
+    }.rescue {
+      case RaftError.NotLeader(leader) =>
+        IO.raiseError(new RuntimeException(s"Not leader: $leader"))
+      case error =>
+        IO.raiseError(new RuntimeException(s"Raft error: $error"))
+    }
+
+  // Implicit instances for providing MTL capabilities to IO
+  given Raise[IO, StateMachineError] = new Raise[IO, StateMachineError] {
+    def functor: cats.Functor[IO] = cats.effect.IO.asyncForIO
+    def raise[E2 <: StateMachineError, A](e: E2): IO[A] = IO.raiseError(new RuntimeException(s"StateMachineError: $e"))
+  }
+  
+  given Raise[IO, LogError] = new Raise[IO, LogError] {
+    def functor: cats.Functor[IO] = cats.effect.IO.asyncForIO
+    def raise[E2 <: LogError, A](e: E2): IO[A] = IO.raiseError(new RuntimeException(s"LogError: $e"))
+  }
+  
+  given Raise[IO, RaftError] = new Raise[IO, RaftError] {
+    def functor: cats.Functor[IO] = cats.effect.IO.asyncForIO
+    def raise[E2 <: RaftError, A](e: E2): IO[A] = IO.raiseError(new RuntimeException(s"RaftError: $e"))
+  }
+
+  given Handle[IO, StateMachineError] = new Handle[IO, StateMachineError] {
+    def applicative: cats.Applicative[IO] = cats.effect.IO.asyncForIO
+    def raise[E2 <: StateMachineError, A](e: E2): IO[A] = IO.raiseError(new RuntimeException(s"StateMachineError: $e"))
+    def handleWith[A](fa: IO[A])(f: StateMachineError => IO[A]): IO[A] = 
+      fa.handleErrorWith {
+        case e: RuntimeException if e.getMessage.startsWith("StateMachineError:") => 
+          // Extract the error from the message - this is a simplified approach for tests
+          f(StateMachineError.OperationFailed("test", e.getMessage))
+        case other => IO.raiseError(other)
+      }
+  }
+  
+  given Handle[IO, LogError] = new Handle[IO, LogError] {
+    def applicative: cats.Applicative[IO] = cats.effect.IO.asyncForIO
+    def raise[E2 <: LogError, A](e: E2): IO[A] = IO.raiseError(new RuntimeException(s"LogError: $e"))
+    def handleWith[A](fa: IO[A])(f: LogError => IO[A]): IO[A] = 
+      fa.handleErrorWith {
+        case e: RuntimeException if e.getMessage.startsWith("LogError:") => 
+          // Extract the error from the message - this is a simplified approach for tests
+          f(LogError.EntryNotFound(-1))
+        case other => IO.raiseError(other)
+      }
+  }
+  
+  given Handle[IO, RaftError] = new Handle[IO, RaftError] {
+    def applicative: cats.Applicative[IO] = cats.effect.IO.asyncForIO
+    def raise[E2 <: RaftError, A](e: E2): IO[A] = IO.raiseError(new RuntimeException(s"RaftError: $e"))
+    def handleWith[A](fa: IO[A])(f: RaftError => IO[A]): IO[A] = 
+      fa.handleErrorWith {
+        case e: RuntimeException if e.getMessage.startsWith("RaftError:") => 
+          // Extract the error from the message - this is a simplified approach for tests
+          f(RaftError.ElectionTimeout)
+        case other => IO.raiseError(other)
+      }
+  }
+}
 
 
 object TestData {
@@ -73,7 +196,7 @@ class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F, T] {
   override def getCurrentState: F[T] = stateRef.get
 }
 
-class InMemoryKVStateMachine[F[_]: Sync] extends KVStateMachine[F] {
+class InMemoryKVStateMachine[F[_]](implicit syncF: Sync[F], raiseF: Raise[F, StateMachineError]) extends KVStateMachine[F] {
   // Use ByteString wrapper for proper ordering and equality
   private case class ByteString(bytes: Array[Byte]) {
     override def equals(obj: Any): Boolean = obj match {
@@ -140,9 +263,9 @@ class InMemoryKVStateMachine[F[_]: Sync] extends KVStateMachine[F] {
       storeRef.set(treeMap) *> indexRef.set(lastIndex)
     } catch {
       case _: ClassCastException => 
-        corruptedState("snapshot data is not a valid Map[Array[Byte], Array[Byte]]")
+        Sync[F].raiseError(new RuntimeException("StateMachineError: snapshot data is not a valid Map[Array[Byte], Array[Byte]]"))
       case e: Exception => 
-        operationFailed("restoreSnapshot", e.getMessage)
+        Sync[F].raiseError(new RuntimeException(s"StateMachineError: restoreSnapshot failed: ${e.getMessage}"))
     }
   }
 

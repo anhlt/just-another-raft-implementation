@@ -1,6 +1,5 @@
 package com.grok.raft.core.internal
 
-import munit.FunSuite
 import com.grok.raft.core.internal.*
 import com.grok.raft.core.protocol.*
 import com.grok.raft.core.*
@@ -9,6 +8,10 @@ import cats.effect.kernel.{Deferred => EffectDeferred}
 import munit.CatsEffectSuite
 
 class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
+
+  // Import MTL test utilities
+  import MtlTestUtils.*
+  import MtlTestUtils.given
 
   val addrA = TestData.addr1
   val addrB = TestData.addr2
@@ -197,43 +200,45 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
   }
 
   test("Log should handle commit progression with gaps in acknowledgments") {
-    for {
-      log <- IO(new InMemoryLog[IO, Unit])
-      store = log.logStorage
-      
-      // Pre-populate with entries
-      _ <- store.put(0, LogEntry(1, 0, NoOp))
-      _ <- store.put(1, LogEntry(1, 1, NoOp))
-      _ <- store.put(2, LogEntry(2, 2, NoOp))
-      _ <- store.put(3, LogEntry(2, 3, NoOp))
-      _ <- store.put(4, LogEntry(2, 4, NoOp))
-      
-      _ <- log.setCommitIndex(-1L)
-      
-      // Acknowledgments with gaps: majority at index 1, but one node at index 4
-      acks = Map(
-        NodeAddress("a", 9090) -> 1L,
-        NodeAddress("b", 9090) -> 1L, 
-        NodeAddress("c", 9090) -> 4L // ahead but alone
-      )
-      
-      result <- log.commitLogs(acks)
-      commitIndex <- log.getCommittedIndex
-      
-      // Later, another node catches up to index 3
-      acks2 = Map(
-        NodeAddress("a", 9090) -> 3L,
-        NodeAddress("b", 9090) -> 1L, 
-        NodeAddress("c", 9090) -> 4L
-      )
-      
-      result2 <- log.commitLogs(acks2)
-      commitIndex2 <- log.getCommittedIndex
-    } yield {
-      assertEquals(commitIndex, 1L) // First commit stops at majority threshold
-      assertEquals(commitIndex2, 3L) // Second commit advances further
-      assertEquals(result, true)
-      assertEquals(result2, true)
+    withLogErrorHandling {
+      for {
+        log <- IO(new InMemoryLog[IO, Unit])
+        store = log.logStorage
+        
+        // Pre-populate with entries
+        _ <- store.put(0, LogEntry(1, 0, NoOp))
+        _ <- store.put(1, LogEntry(1, 1, NoOp))
+        _ <- store.put(2, LogEntry(2, 2, NoOp))
+        _ <- store.put(3, LogEntry(2, 3, NoOp))
+        _ <- store.put(4, LogEntry(2, 4, NoOp))
+        
+        _ <- log.setCommitIndex(-1L)
+        
+        // Acknowledgments with gaps: majority at index 1, but one node at index 4
+        acks = Map(
+          NodeAddress("a", 9090) -> 1L,
+          NodeAddress("b", 9090) -> 1L, 
+          NodeAddress("c", 9090) -> 4L // ahead but alone
+        )
+        
+        result <- log.commitLogs(acks)
+        commitIndex <- log.getCommittedIndex
+        
+        // Later, another node catches up to index 3
+        acks2 = Map(
+          NodeAddress("a", 9090) -> 3L,
+          NodeAddress("b", 9090) -> 1L, 
+          NodeAddress("c", 9090) -> 4L
+        )
+        
+        result2 <- log.commitLogs(acks2)
+        commitIndex2 <- log.getCommittedIndex
+      } yield {
+        assertEquals(commitIndex, 1L) // First commit stops at majority threshold
+        assertEquals(commitIndex2, 3L) // Second commit advances further
+        assertEquals(result, true)
+        assertEquals(result2, true)
+      }
     }
   }
 

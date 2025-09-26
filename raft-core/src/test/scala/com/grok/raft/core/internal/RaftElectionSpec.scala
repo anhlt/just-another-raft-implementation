@@ -2,7 +2,9 @@ package com.grok.raft.core.internal
 import cats.*
 import cats.effect.*
 import cats.implicits.*
+import cats.mtl.Raise
 import com.grok.raft.core.*
+import com.grok.raft.core.error.RaftError
 import org.typelevel.log4cats.Logger
 import com.grok.raft.core.internal.*
 import munit.CatsEffectSuite
@@ -32,7 +34,7 @@ class TestRaft[F[_]: Async, T](
     Monad[F].pure(emptyD)
   }
 
-  override def background[A](fa: => F[A])(using MonadThrow[F]): F[Unit] = fa >> Async[F].unit
+  override def background[A](fa: => F[A])(using Monad[F], Raise[F, RaftError]): F[Unit] = fa >> Async[F].unit
 
   override def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit] = fa >> Async[F].unit
 
@@ -48,12 +50,14 @@ class TestRaft[F[_]: Async, T](
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = Monad[F].pure(false)
 
   // No‐ops for scheduling/heartbeats
-  def scheduleElection()(using Monad[F], Logger[F]): F[Unit]    = Monad[F].unit
-  def scheduleReplication()(using Monad[F], Logger[F]): F[Unit] = Monad[F].unit
-  def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit]   = Monad[F].unit
+  def scheduleElection()(using Monad[F]): F[Unit]    = Monad[F].unit
+  def scheduleReplication()(using Monad[F]): F[Unit] = Monad[F].unit
+  override def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit] = Monad[F].unit
 }
 
 class RaftElectionSpec extends CatsEffectSuite {
+  import MtlTestUtils.*
+  import MtlTestUtils.given
 
   // a no‐op logger for simplicity
 
@@ -92,7 +96,9 @@ class RaftElectionSpec extends CatsEffectSuite {
       )
 
       // 4) kick off rafting — this will (a) runElection(), (b) collect votes, (c) announce leader
-      _ <- raft.start()
+      _ <- withAllErrorHandling {
+        raft.start()
+      }
 
       // 5) block until our announcer completes with a leader
       leaderAddress <- announcer.listen()

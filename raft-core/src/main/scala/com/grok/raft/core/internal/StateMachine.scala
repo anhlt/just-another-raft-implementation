@@ -1,8 +1,11 @@
 package com.grok.raft.core.internal
 
 import cats.*
+import cats.mtl.Raise
+
 import com.grok.raft.core.protocol.*
 import com.grok.raft.core.error.StateMachineError
+import com.grok.raft.core.error.* // Import extension methods
 
 
 /**
@@ -27,19 +30,22 @@ import com.grok.raft.core.error.StateMachineError
  * 
  * @tparam F The effect type for state machine operations
  */
-trait StateMachine[F[_]: MonadThrow, T]:
+trait StateMachine[F[_]: Monad, T]:
   def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]]
   def applyRead: PartialFunction[ReadCommand[?], F[Any]]
   def appliedIndex: F[Long]
   def restoreSnapshot[T](lastIndex: Long, data: T): F[Unit]
   def getCurrentState: F[T]
   
-  // Helper methods for error handling
-  protected def invalidCommand[A](command: Any): F[A] = 
-    MonadThrow[F].raiseError(StateMachineError(s"Invalid command: ${command.getClass.getSimpleName}"))
-    
-  protected def operationFailed[A](operation: String, reason: String): F[A] = 
-    MonadThrow[F].raiseError(StateMachineError(s"$operation failed: $reason"))
-    
-  protected def corruptedState[A](details: String): F[A] = 
-    MonadThrow[F].raiseError(StateMachineError(s"State corruption detected: $details"))
+  // MTL-based error raising methods
+  protected def invalidCommand[A](command: Any)(using Raise[F, StateMachineError]): F[A] = 
+    StateMachineError.InvalidCommand(command.getClass.getSimpleName).raise[F, A]
+     
+  protected def operationFailed[A](operation: String, reason: String)(using Raise[F, StateMachineError]): F[A] = 
+    StateMachineError.OperationFailed(operation, reason).raise[F, A]
+     
+  protected def corruptedState[A](details: String)(using Raise[F, StateMachineError]): F[A] = 
+    StateMachineError.StateCorruption(details).raise[F, A]
+
+  protected def applyCommandFailed[A](index: Long, command: WriteCommand[?])(using Raise[F, StateMachineError]): F[A] =
+    StateMachineError.ApplyCommandFailed(index, command).raise[F, A]
