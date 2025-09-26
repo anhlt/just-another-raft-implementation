@@ -191,7 +191,7 @@ trait Log[F[_], T]:
       } yield committed.nonEmpty
     }
 
-  def append[T](term: Long, command: Command[T], deferred: RaftDeferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
+  def append[T](term: Long, command: Command, deferred: RaftDeferred[F, T])(using MonadThrow[F], Logger[F]): F[LogEntry] =
     transactional {
       for {
         lastIndex <- logStorage.lastIndex
@@ -258,7 +258,7 @@ trait Log[F[_], T]:
     } yield ()
   }
 
-  def applyCommand(index: Long, command: Command[?])(using MonadThrow[F]): F[Unit] = {
+  def applyCommand(index: Long, command: Command)(using MonadThrow[F]): F[Unit] = {
     val output = command match {
 
       case command: ReadCommand[_] =>
