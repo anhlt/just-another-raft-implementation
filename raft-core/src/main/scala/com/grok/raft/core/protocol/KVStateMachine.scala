@@ -1,7 +1,9 @@
 package com.grok.raft.core.protocol
 
 import cats.*
+import cats.mtl.Raise
 import com.grok.raft.core.internal.StateMachine
+import com.grok.raft.core.error.StateMachineError
 
 /**
  * Key-Value specific state machine trait that extends the base StateMachine.
@@ -20,7 +22,7 @@ import com.grok.raft.core.internal.StateMachine
  * 
  * @tparam F The effect type for state machine operations
  */
-trait KVStateMachine[F[_]: MonadThrow] extends StateMachine[F, Map[Array[Byte], Array[Byte]]] {
+trait KVStateMachine[F[_]](implicit monadF: Monad[F], raiseF: Raise[F, StateMachineError]) extends StateMachine[F, Map[Array[Byte], Array[Byte]]] {
   
   /**
    * Core KV operations that implementations must provide
