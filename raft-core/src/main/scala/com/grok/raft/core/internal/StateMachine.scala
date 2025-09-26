@@ -1,6 +1,8 @@
 package com.grok.raft.core.internal
 
+import cats.*
 import com.grok.raft.core.protocol.*
+import com.grok.raft.core.error.StateMachineError
 
 
 /**
@@ -25,9 +27,19 @@ import com.grok.raft.core.protocol.*
  * 
  * @tparam F The effect type for state machine operations
  */
-trait StateMachine[F[_], T]:
+trait StateMachine[F[_]: MonadThrow, T]:
   def applyWrite: PartialFunction[(Long, WriteCommand[?]), F[Any]]
   def applyRead: PartialFunction[ReadCommand[?], F[Any]]
   def appliedIndex: F[Long]
   def restoreSnapshot[T](lastIndex: Long, data: T): F[Unit]
   def getCurrentState: F[T]
+  
+  // Helper methods for error handling
+  protected def invalidCommand[A](command: Any): F[A] = 
+    MonadThrow[F].raiseError(StateMachineError(s"Invalid command: ${command.getClass.getSimpleName}"))
+    
+  protected def operationFailed[A](operation: String, reason: String): F[A] = 
+    MonadThrow[F].raiseError(StateMachineError(s"$operation failed: $reason"))
+    
+  protected def corruptedState[A](details: String): F[A] = 
+    MonadThrow[F].raiseError(StateMachineError(s"State corruption detected: $details"))

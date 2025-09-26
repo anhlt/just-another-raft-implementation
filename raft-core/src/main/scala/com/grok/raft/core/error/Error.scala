@@ -14,3 +14,7 @@ case class LogError(val message: String) extends BaseError(message) {
 case class MembershipError(val message: String) extends BaseError(message) {
   override def toString: String = s"MembershipError: $message"
 }
+
+case class StateMachineError(val message: String) extends BaseError(message) {
+  override def toString: String = s"StateMachineError: $message"
+}

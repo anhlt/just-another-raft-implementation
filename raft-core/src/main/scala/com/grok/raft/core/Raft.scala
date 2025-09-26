@@ -201,7 +201,7 @@ trait Raft[F[_], T] {
     }
   }
 
-  def onCommand[T](c: Command[T])(using MonadThrow[F], Logger[F]): F[T] = c match {
+  def onCommand[T](c: Command)(using MonadThrow[F], Logger[F]): F[T] = c match {
     case cmd: ReadCommand[T] =>
       for {
         node <- currentNode
@@ -212,7 +212,7 @@ trait Raft[F[_], T] {
               leaderAddress <- leaderAnnouncer.listen()
               rs            <- rpcClient.send(leaderAddress, cmd)
             } yield rs
-      } yield (result)
+      } yield result.asInstanceOf[T]
 
     case cmd: WriteCommand[T] =>
       for {
@@ -267,7 +267,7 @@ trait Raft[F[_], T] {
           _             <- trace"The current leader is ${leaderAddress}."
           response      <- rpcClient.send(leaderAddress, cmd)
           _             <- trace"Response for the write command received from the leader"
-          actions       <- deferred.complete(response)
+          actions       <- deferred.complete(response.asInstanceOf[T])
         } yield List.empty
       }
   }

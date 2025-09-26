@@ -12,7 +12,7 @@ trait RpcClient[F[_]] {
 
   // def send(serverId: Node, snapshot: Snapshot, lastEntry: LogEntry): F[AppendEntriesResponse]
 
-  def send[T](serverId: NodeAddress, command: Command[T]): F[T]
+  def send[T](serverId: NodeAddress, command: Command): F[T]
 
   def join(serverId: NodeAddress, newNode: NodeAddress): F[Boolean]
 

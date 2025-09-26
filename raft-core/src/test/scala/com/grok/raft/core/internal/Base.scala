@@ -16,6 +16,8 @@ import com.grok.raft.core.storage.SnapshotStorage
 import com.grok.raft.core.storage.Snapshot
 import com.grok.raft.core.storage.StateStorage
 import com.grok.raft.core.storage.PersistedState
+import scala.collection.immutable.TreeMap
+import java.util.Arrays
 
 object NoOp extends ReadCommand[Unit]
 
@@ -69,6 +71,83 @@ class InMemoryStateMachine[F[_]: Sync, T] extends StateMachine[F, T] {
     stateRef.set(data.asInstanceOf[T]) *> indexRef.set(lastIndex)
 
   override def getCurrentState: F[T] = stateRef.get
+}
+
+class InMemoryKVStateMachine[F[_]: Sync] extends KVStateMachine[F] {
+  // Use ByteString wrapper for proper ordering and equality
+  private case class ByteString(bytes: Array[Byte]) {
+    override def equals(obj: Any): Boolean = obj match {
+      case other: ByteString => Arrays.equals(bytes, other.bytes)
+      case _ => false
+    }
+    override def hashCode(): Int = Arrays.hashCode(bytes)
+  }
+  
+  private implicit val byteStringOrdering: Ordering[ByteString] = 
+    (x: ByteString, y: ByteString) => Arrays.compare(x.bytes, y.bytes)
+
+  private val storeRef = Ref.unsafe[F, TreeMap[ByteString, Array[Byte]]](TreeMap.empty)
+  private val indexRef = Ref.unsafe[F, Long](0L)
+
+  override def put(key: Array[Byte], value: Array[Byte]): F[Unit] =
+    storeRef.update(_ + (ByteString(key) -> value))
+
+  override def get(key: Array[Byte]): F[Option[Array[Byte]]] =
+    storeRef.get.map(_.get(ByteString(key)))
+
+  override def delete(key: Array[Byte]): F[Unit] =
+    storeRef.update(_ - ByteString(key))
+
+  override def contains(key: Array[Byte]): F[Boolean] =
+    storeRef.get.map(_.contains(ByteString(key)))
+
+  override def range(startKey: Array[Byte], endKey: Array[Byte], limit: Option[Int]): F[List[(Array[Byte], Array[Byte])]] =
+    storeRef.get.map { store =>
+      val start = ByteString(startKey)
+      val end = ByteString(endKey)
+      val filtered = store.range(start, end).toList.map { case (k, v) => (k.bytes, v) }
+      limit.fold(filtered)(filtered.take)
+    }
+
+  override def scan(prefix: Array[Byte], limit: Option[Int]): F[List[(Array[Byte], Array[Byte])]] =
+    storeRef.get.map { store =>
+      val prefixStr = ByteString(prefix)
+      val filtered = store.rangeFrom(prefixStr).takeWhile { case (k, _) => 
+        k.bytes.take(prefix.length).sameElements(prefix)
+      }.toList.map { case (k, v) => (k.bytes, v) }
+      limit.fold(filtered)(filtered.take)
+    }
+
+  override def keys(prefix: Option[Array[Byte]], limit: Option[Int]): F[List[Array[Byte]]] =
+    storeRef.get.map { store =>
+      val filtered = prefix match {
+        case Some(p) => 
+          val prefixStr = ByteString(p)
+          store.rangeFrom(prefixStr).takeWhile { case (k, _) => 
+            k.bytes.take(p.length).sameElements(p)
+          }.keys.toList.map(_.bytes)
+        case None => store.keys.toList.map(_.bytes)
+      }
+      limit.fold(filtered)(filtered.take)
+    }
+
+  override def appliedIndex: F[Long] = indexRef.get
+
+  override def restoreSnapshot[T](lastIndex: Long, data: T): F[Unit] = {
+    try {
+      val kvData = data.asInstanceOf[Map[Array[Byte], Array[Byte]]]
+      val treeMap = TreeMap.from(kvData.map { case (k, v) => ByteString(k) -> v })
+      storeRef.set(treeMap) *> indexRef.set(lastIndex)
+    } catch {
+      case _: ClassCastException => 
+        corruptedState("snapshot data is not a valid Map[Array[Byte], Array[Byte]]")
+      case e: Exception => 
+        operationFailed("restoreSnapshot", e.getMessage)
+    }
+  }
+
+  override def getCurrentState: F[Map[Array[Byte], Array[Byte]]] = 
+    storeRef.get.map(_.unsorted.map { case (k, v) => k.bytes -> v }.toMap)
 }
 
 class DummyMembershipManager[F[_]: Sync] extends MembershipManager[F]:
@@ -125,7 +204,7 @@ object StubLeaderAnnouncer {
 
 class StubRpcClient[F[_]: Sync](voteMap: Map[NodeAddress, Boolean]) extends RpcClient[F] {
 
-  override def send[T](serverId: NodeAddress, command: Command[T]): F[T] = ???
+  override def send[T](serverId: NodeAddress, command: Command): F[T] = ???
 
   override def join(serverId: NodeAddress, newNode: NodeAddress): F[Boolean] = ???
 
