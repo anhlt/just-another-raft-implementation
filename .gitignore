@@ -1,12 +1,27 @@
-**/target
-.bloop
-.metals
-.vscode
-.idea
-.bsp
-**/project/metals.sbt
-project/project/metals.sbt
-project/project/project/metals.sbt
+# SBT build artifacts
+**/target/
+*.class
+
+# Scala IDE artifacts  
+.bloop/
+.metals/
+.bsp/
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# Metals LSP files
+metals.sbt
+**/metals.sbt
+project/**/metals.sbt
+
+# Environment files
 .envrc
+.env
+
+# Other artifacts
 .upload.json
-*/metals.sbt
+*.log
+.DS_Store
