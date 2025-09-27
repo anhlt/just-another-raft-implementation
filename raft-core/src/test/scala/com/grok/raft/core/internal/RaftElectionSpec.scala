@@ -38,9 +38,9 @@ class TestRaft[F[_]: Async, T](
 
   override def schedule(delay: FiniteDuration)(fa: => F[Unit])(using Monad[F]): F[Unit] = fa >> Async[F].unit
 
-  val isRunning: Ref[F, Boolean]                                  = Ref.unsafe[F, Boolean](true)
-  override def setRunning(r: Boolean): F[Unit]                    = isRunning.set(r)
-  override def getRunning: F[Boolean]                             = isRunning.get
+  val isRunning: Ref[F, Boolean]               = Ref.unsafe[F, Boolean](true)
+  override def setRunning(r: Boolean): F[Unit] = isRunning.set(r)
+  override def getRunning: F[Boolean]          = isRunning.get
 
   val currentNodeRef: Ref[F, Node] = Ref.unsafe[F, Node](config.currentNode)
 
@@ -50,8 +50,8 @@ class TestRaft[F[_]: Async, T](
   override def electionTimeoutElapsed(using Monad[F]): F[Boolean] = Monad[F].pure(false)
 
   // No‐ops for scheduling/heartbeats
-  def scheduleElection()(using Monad[F]): F[Unit]    = Monad[F].unit
-  def scheduleReplication()(using Monad[F]): F[Unit] = Monad[F].unit
+  def scheduleElection()(using Monad[F]): F[Unit]                      = Monad[F].unit
+  def scheduleReplication()(using Monad[F]): F[Unit]                   = Monad[F].unit
   override def updateLastHeartbeat(using Monad[F], Logger[F]): F[Unit] = Monad[F].unit
 }
 
@@ -102,7 +102,7 @@ class RaftElectionSpec extends CatsEffectSuite {
 
       // 5) block until our announcer completes with a leader
       leaderAddress <- announcer.listen()
-      currentNode <- raft.currentNode
+      currentNode   <- raft.currentNode
     } yield {
       assert(
         currentNode.isInstanceOf[Leader],

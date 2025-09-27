@@ -32,11 +32,9 @@ enum MembershipError:
   case QuorumNotReached(required: Int, actual: Int)
 
 // Extension methods for raising domain errors with MTL
-extension (error: RaftError)
-  def raise[F[_], A](using Raise[F, RaftError]): F[A] = Raise[F, RaftError].raise(error)
+extension (error: RaftError) def raise[F[_], A](using Raise[F, RaftError]): F[A] = Raise[F, RaftError].raise(error)
 
-extension (error: LogError)
-  def raise[F[_], A](using Raise[F, LogError]): F[A] = Raise[F, LogError].raise(error)
+extension (error: LogError) def raise[F[_], A](using Raise[F, LogError]): F[A] = Raise[F, LogError].raise(error)
 
 extension (error: StateMachineError)
   def raise[F[_], A](using Raise[F, StateMachineError]): F[A] = Raise[F, StateMachineError].raise(error)

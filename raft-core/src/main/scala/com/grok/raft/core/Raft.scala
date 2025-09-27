@@ -124,7 +124,9 @@ trait Raft[F[_], T] {
     }
   }
 
-  def onLogRequest(msg: LogRequest)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[LogRequestResponse] = {
+  def onLogRequest(
+      msg: LogRequest
+  )(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[LogRequestResponse] = {
     for {
       _                   <- trace"A AppendEntriesRequest received from ${msg.leaderId} with term ${msg.term}"
       logState            <- log.state
@@ -144,7 +146,9 @@ trait Raft[F[_], T] {
     } yield response
   }
 
-  def onLogRequestResponse(msg: LogRequestResponse)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[Unit] =
+  def onLogRequestResponse(
+      msg: LogRequestResponse
+  )(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[Unit] =
     for {
       _        <- trace"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}"
       logState <- log.state
@@ -154,11 +158,13 @@ trait Raft[F[_], T] {
       _        <- runActions(actions)
     } yield ()
 
-  def onVoteRequest(msg: VoteRequest)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[VoteResponse] = {
+  def onVoteRequest(
+      msg: VoteRequest
+  )(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[VoteResponse] = {
     for {
-      _                   <- trace"A Vote request received from ${msg.proposedLeaderAddress}, Term: ${msg.candidateTerm}, ${msg}"
-      logState            <- log.state
-      config              <- membershipManager.getClusterConfiguration
+      _        <- trace"A Vote request received from ${msg.proposedLeaderAddress}, Term: ${msg.candidateTerm}, ${msg}"
+      logState <- log.state
+      config   <- membershipManager.getClusterConfiguration
       (response, actions) <- modifyState(_.onVoteRequest(msg, logState, config))
 
       _ <- runActions(actions)
@@ -203,7 +209,7 @@ trait Raft[F[_], T] {
     }
   }
 
-  def onCommand[T](c: Command)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[T] = c match {
+  def onCommand[T](c: Command)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[T] = (c: @unchecked) match {
     case cmd: ReadCommand[T] =>
       for {
         node <- currentNode
@@ -252,9 +258,7 @@ trait Raft[F[_], T] {
     */
   private def onWriteCommand[T](node: Node, cmd: WriteCommand[T], deferred: RaftDeferred[F, T])(using
       Monad[F],
-      Logger[F],
-      Raise[F, RaftError],
-      Raise[F, LogError]
+      Logger[F]
   ): F[List[Action]] = {
     node match
       case leader: Leader => {
