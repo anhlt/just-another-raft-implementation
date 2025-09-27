@@ -1,12 +1,63 @@
-**/target
-.bloop
-.metals
-.vscode
-.idea
-.bsp
-**/project/metals.sbt
+# Build outputs
+**/target/
+**/project/target/
+
+# IDE files
+.bloop/
+.metals/
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Build tool cache
+.bsp/
+
+# Metals LSP
+**/metals.sbt
+project/metals.sbt
 project/project/metals.sbt
 project/project/project/metals.sbt
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Environment and secrets
 .envrc
+.env
+.env.local
+.env.*.local
+
+# Upload artifacts
 .upload.json
-*/metals.sbt
+
+# Scala worksheet
+*.sc
+
+# Ensime
+.ensime
+.ensime_cache/
+
+# Dotty-specific
+.dotty-ide-artifact
+.dotty-ide.json
+
+# Coursier cache
+.coursier/
