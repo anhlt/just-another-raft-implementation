@@ -8,6 +8,6 @@ trait LogEntryI {
   val index: Long
   val command: Command
   def position: Long = index + 1
-} 
+}
 
 case class LogEntry(term: Long, index: Long, command: Command) extends LogEntryI

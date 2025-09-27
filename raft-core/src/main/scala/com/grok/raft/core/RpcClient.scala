@@ -3,7 +3,6 @@ package com.grok.raft.core
 import com.grok.raft.core.protocol.*
 import com.grok.raft.core.internal.*
 
-
 trait RpcClient[F[_]] {
 
   def send(serverId: NodeAddress, voteRequest: VoteRequest): F[VoteResponse]
