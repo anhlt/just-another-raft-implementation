@@ -21,6 +21,21 @@ class RocksDBKVStateMachine[F[_]: Async: Logger] private (
 
   private val APPLIED_INDEX_KEY = "__applied_index__".getBytes
 
+  private def iteratorToStream(iterator: RocksIterator): LazyList[Array[Byte]] =
+    if iterator.isValid then
+      val key = iterator.key().clone()
+      iterator.next()
+      key #:: iteratorToStream(iterator)
+    else LazyList.empty
+
+  private def iteratorToKeyValueStream(iterator: RocksIterator): LazyList[(Array[Byte], Array[Byte])] =
+    if iterator.isValid then
+      val key = iterator.key().clone()
+      val value = iterator.value().clone()
+      iterator.next()
+      (key, value) #:: iteratorToKeyValueStream(iterator)
+    else LazyList.empty
+
   private def clearAllData(): F[Unit] =
     for
       _ <- trace"Clearing all data from state machine"
@@ -29,9 +44,12 @@ class RocksDBKVStateMachine[F[_]: Async: Logger] private (
         try
           iterator.seekToFirst()
           val writeBatch = new WriteBatch()
-          while iterator.isValid do
-            writeBatch.delete(kvDataCF, iterator.key())
-            iterator.next()
+          
+          iteratorToStream(iterator)
+            .foldLeft(()) { (_, key) =>
+              writeBatch.delete(kvDataCF, key)
+            }
+          
           db.write(writeOptions, writeBatch)
           writeBatch.close()
         finally
@@ -80,21 +98,17 @@ class RocksDBKVStateMachine[F[_]: Async: Logger] private (
       iterator <- Sync[F].delay(db.newIterator(kvDataCF, readOptions))
       result <- Sync[F].delay {
         iterator.seek(startKey)
-        val results = scala.collection.mutable.ListBuffer[(Array[Byte], Array[Byte])]()
-        var count = 0
         
-        while (
-          iterator.isValid && 
-          java.util.Arrays.compare(iterator.key(), endKey) < 0 &&
-          limit.forall(count < _)
-        ) {
-          results += ((iterator.key().clone(), iterator.value().clone()))
-          iterator.next()
-          count += 1
-        }
+        val results = iteratorToKeyValueStream(iterator)
+          .takeWhile { case (key, _) => java.util.Arrays.compare(key, endKey) < 0 }
+          .take(limit.getOrElse(Int.MaxValue))
+          .foldLeft(List.empty[(Array[Byte], Array[Byte])]) { (acc, keyValue) =>
+            keyValue :: acc
+          }
+          .reverse
         
         iterator.close()
-        results.toList
+        results
       }
       _ <- trace"Range query returned ${result.size} results"
     yield result
@@ -108,21 +122,17 @@ class RocksDBKVStateMachine[F[_]: Async: Logger] private (
       iterator <- Sync[F].delay(db.newIterator(kvDataCF, readOptions))
       result <- Sync[F].delay {
         iterator.seek(prefix)
-        val results = scala.collection.mutable.ListBuffer[(Array[Byte], Array[Byte])]()
-        var count = 0
         
-        while (
-          iterator.isValid && 
-          iterator.key().startsWith(prefix) &&
-          limit.forall(count < _)
-        ) {
-          results += ((iterator.key().clone(), iterator.value().clone()))
-          iterator.next()
-          count += 1
-        }
+        val results = iteratorToKeyValueStream(iterator)
+          .takeWhile { case (key, _) => key.startsWith(prefix) }
+          .take(limit.getOrElse(Int.MaxValue))
+          .foldLeft(List.empty[(Array[Byte], Array[Byte])]) { (acc, keyValue) =>
+            keyValue :: acc
+          }
+          .reverse
         
         iterator.close()
-        results.toList
+        results
       }
       _ <- trace"Scan returned ${result.size} results"
     yield result
@@ -138,21 +148,16 @@ class RocksDBKVStateMachine[F[_]: Async: Logger] private (
         prefix.foreach(iterator.seek)
         if prefix.isEmpty then iterator.seekToFirst()
         
-        val results = scala.collection.mutable.ListBuffer[Array[Byte]]()
-        var count = 0
-        
-        while (
-          iterator.isValid && 
-          prefix.forall(p => iterator.key().startsWith(p)) &&
-          limit.forall(count < _)
-        ) {
-          results += iterator.key().clone()
-          iterator.next()
-          count += 1
-        }
+        val results = iteratorToStream(iterator)
+          .takeWhile(key => prefix.forall(p => key.startsWith(p)))
+          .take(limit.getOrElse(Int.MaxValue))
+          .foldLeft(List.empty[Array[Byte]]) { (acc, key) =>
+            key :: acc
+          }
+          .reverse
         
         iterator.close()
-        results.toList
+        results
       }
       _ <- trace"Keys query returned ${result.size} results"
     yield result
@@ -175,15 +180,12 @@ class RocksDBKVStateMachine[F[_]: Async: Logger] private (
       pairs <- Sync[F].delay {
         try 
           iterator.seekToFirst()
-          val result = collection.mutable.Map[Array[Byte], Array[Byte]]()
-          while iterator.isValid do
-            val key = iterator.key()
-            val value = iterator.value()
-            // Skip metadata keys
-            if !key.startsWith(APPLIED_INDEX_KEY) then
-              result += (key.clone() -> value.clone())
-            iterator.next()
-          result.toMap
+          
+          iteratorToKeyValueStream(iterator)
+            .filterNot { case (key, _) => key.startsWith(APPLIED_INDEX_KEY) }
+            .foldLeft(Map.empty[Array[Byte], Array[Byte]]) { case (map, (key, value)) =>
+              map + (key -> value)
+            }
         finally
           iterator.close()
       }
@@ -277,9 +279,4 @@ object RocksDBKVStateMachine:
 extension [T](array: Array[T])
   def startsWith(prefix: Array[T]): Boolean =
     if prefix.length > array.length then false
-    else 
-      var i = 0
-      while i < prefix.length do
-        if array(i) != prefix(i) then return false
-        i += 1
-      true
+    else prefix.zip(array).forall { case (p, a) => p == a }
