@@ -209,29 +209,30 @@ trait Raft[F[_], T] {
     }
   }
 
-  def onCommand[T](c: Command)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[T] = (c: @unchecked) match {
-    case cmd: ReadCommand[T] =>
-      for {
-        node <- currentNode
-        result <- node match
-          case leader: Leader => log.applyReadCommand(cmd)
-          case _ =>
-            for {
-              leaderAddress <- leaderAnnouncer.listen()
-              rs            <- rpcClient.send(leaderAddress, cmd)
-            } yield rs
-      } yield result.asInstanceOf[T]
+  def onCommand[T](c: Command)(using Monad[F], Logger[F], Raise[F, RaftError], Raise[F, LogError]): F[T] =
+    (c: @unchecked) match {
+      case cmd: ReadCommand[T] =>
+        for {
+          node <- currentNode
+          result <- node match
+            case leader: Leader => log.applyReadCommand(cmd)
+            case _ =>
+              for {
+                leaderAddress <- leaderAnnouncer.listen()
+                rs            <- rpcClient.send(leaderAddress, cmd)
+              } yield rs
+        } yield result.asInstanceOf[T]
 
-    case cmd: WriteCommand[T] =>
-      for {
-        deferred <- deferred[T]
-        node     <- currentNode
-        config   <- membershipManager.getClusterConfiguration
-        actions  <- onWriteCommand(node, cmd, deferred)
-        _        <- runActions(actions)
-        result   <- deferred.get
-      } yield (result)
-  }
+      case cmd: WriteCommand[T] =>
+        for {
+          deferred <- deferred[T]
+          node     <- currentNode
+          config   <- membershipManager.getClusterConfiguration
+          actions  <- onWriteCommand(node, cmd, deferred)
+          _        <- runActions(actions)
+          result   <- deferred.get
+        } yield (result)
+    }
 
   /** Processes a write command on the given node by executing the command logic and producing a list of follow-up
     * actions.
