@@ -16,8 +16,8 @@ import com.grok.raft.core.protocol._
   *      - prevSentLogIndex = prevSentIndex (0-based)
   *      - prevLastLogTerm = term of that previous entry
   *      - leaderCommit = current commit index
-  *      - entries = the list of fetched LogEntry objects
-  *      5. Send the `LogRequest` to the specified peer and return its `LogRequestResponse`.
+  *      - entries = the list of fetched LogEntry objects 5. Send the `LogRequest` to the specified peer and return its
+  *        `LogRequestResponse`.
   *
   * @tparam F
   *   effect type (e.g. IO, Task, etc.)
