@@ -21,4 +21,8 @@ object Dependencies {
   val munitScalaCheckEffect = Def.setting(
     "org.typelevel" %% "scalacheck-effect-munit" % "2.0.0-M2" % Test
   )
+
+  val rocksDB              = Def.setting("org.rocksdb" % "rocksdbjni" % "8.11.4")
+  val scodecCore           = Def.setting("org.scodec" %% "scodec-core" % "2.2.2")
+  val scodecCats           = Def.setting("org.scodec" %% "scodec-cats" % "1.2.0")
 }
