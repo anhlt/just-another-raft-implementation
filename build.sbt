@@ -48,7 +48,12 @@ val raft = (project in file("raft-core"))
 val raftCatsEffect = (project in file("raft-cats-effect"))
   .settings(
     name := "raft-cats-effect",
-    commonSettings
+    commonSettings,
+    libraryDependencies ++= Seq(
+      Dependencies.rocksDB.value,
+      Dependencies.scodecCore.value,
+      Dependencies.scodecCats.value
+    )
   )
   .dependsOn(raft)
 
