@@ -77,9 +77,9 @@ class IndexTrackingEdgeCasesSpec extends CatsEffectSuite {
     val (state2, _)   = leader1.onLogRequestResponse(logState, clusterConfig, olderResponse)
     val leader2       = state2.asInstanceOf[Leader]
 
-    // Should not regress to older index
-    assertEquals(leader2.ackIndexMap(addrB), 6L) // from olderResponse, not 8L from newerResponse
-    assertEquals(leader2.sentIndexMap(addrB), 6L)
+    // Should not regress to older index (Bug 6 fix: matchIndex is monotone, §5.3 Figure 2)
+    assertEquals(leader2.ackIndexMap(addrB), 8L, "ackIndexMap must never decrease; stale ack must be ignored")
+    assertEquals(leader2.sentIndexMap(addrB), 6L, "sentIndexMap follows the latest ackLogIndex")
   }
 
   test("Leader should handle follower that gets far behind") {

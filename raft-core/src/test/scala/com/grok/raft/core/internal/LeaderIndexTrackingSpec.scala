@@ -154,7 +154,7 @@ class LeaderIndexTrackingSpec extends FunSuite {
     assertEquals(actions(1), ReplicateLog(addrB, 1L, -1L))
   }
 
-  test("Leader.onVoteRequest should update index maps when rejecting vote but helping candidate catch up") {
+  test("Leader.onVoteRequest when rejecting a stale-term vote helps candidate catch up via replication") {
     val leader = Leader(
       address = addrA,
       currentTerm = 3L,
@@ -173,15 +173,17 @@ class LeaderIndexTrackingSpec extends FunSuite {
     assert(newNode.isInstanceOf[Leader])
     val updatedLeader = newNode.asInstanceOf[Leader]
 
-    // Should update tracking maps with candidate's last index
-    assertEquals(updatedLeader.sentIndexMap(addrB), 4L)
-    assertEquals(updatedLeader.ackIndexMap(addrB), 4L)
+    // Bug 20 fix: ackIndexMap must NOT be updated from the candidate's unverified
+    // self-reported log index.  Only a confirmed LogRequestResponse may advance matchIndex.
+    assertEquals(updatedLeader.sentIndexMap(addrB), 2L, "sentIndexMap must not be mutated by a VoteRequest")
+    assertEquals(updatedLeader.ackIndexMap(addrB), 1L, "ackIndexMap must not be driven by unverified candidate data")
 
     assertEquals(response.voteGranted, false)
     assertEquals(response.term, 3L) // leader's current term
 
     assertEquals(actions.length, 1)
-    assertEquals(actions(0), ReplicateLog(addrB, 3L, 4L)) // help candidate catch up
+    // Replication uses the leader's own (verified) sentIndex, not the candidate's claim.
+    assertEquals(actions(0), ReplicateLog(addrB, 3L, 2L))
   }
 
   test("Leader.onReplicateLog should generate replication actions for all followers") {

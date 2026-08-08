@@ -158,25 +158,33 @@ case class Follower(
     val logOk =
       (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= logState.lastLogIndex)
 
-    val termOk =
-      candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
-        .contains(proposedLeaderAddress))
+    // Phase 1 (Raft Paper 5.1): a strictly greater term is adopted unconditionally,
+    // independently of whether the vote is granted. Adopting a term clears the vote
+    // cast in the older term, otherwise this node could never vote in the new term.
+    val termAdopted   = candidateTerm > currentTerm
+    val effectiveTerm = math.max(currentTerm, candidateTerm)
+    val effectiveVote = Option.when(!termAdopted)(votedFor).flatten
 
-    (logOk && termOk) match
+    // Phase 2 (Raft Paper 5.2 and 5.4.1): grant only when the request is not stale,
+    // no other vote is bound in the effective term, and the candidate log is up to date.
+    val voteOk  = effectiveVote.forall(_ == proposedLeaderAddress)
+    val granted = logOk && voteOk && candidateTerm >= currentTerm
+
+    granted match
       case true =>
         (
-          this.copy(currentTerm = candidateTerm, votedFor = Some(proposedLeaderAddress)),
+          this.copy(currentTerm = effectiveTerm, votedFor = Some(proposedLeaderAddress)),
           (
-            VoteResponse(address, candidateTerm, logOk && termOk),
+            VoteResponse(address, effectiveTerm, true),
             List(StoreState)
           )
         )
       case false =>
         (
-          this,
+          this.copy(currentTerm = effectiveTerm, votedFor = effectiveVote),
           (
-            VoteResponse(address, currentTerm, logOk && termOk),
-            List.empty[Action]
+            VoteResponse(address, effectiveTerm, false),
+            Option.when(termAdopted)(StoreState).toList
           )
         )
   }
@@ -378,25 +386,39 @@ case class Candidate(
     val logOk =
       (candidateLastLogTerm > lastLogTerm) || (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= logState.lastLogIndex)
 
-    val termOk =
-      candidateTerm > currentTerm || (candidateTerm == currentTerm && votedFor
-        .contains(proposedLeaderAddress))
+    // Phase 1 (Raft Paper 5.1): adopt a strictly greater term unconditionally and
+    // clear the self-vote bound to the abandoned term.
+    val termAdopted   = candidateTerm > currentTerm
+    val effectiveTerm = math.max(currentTerm, candidateTerm)
+    val effectiveVote = Option.when(!termAdopted)(votedFor).flatten
 
-    (logOk && termOk) match
+    // Phase 2: a candidate has voted for itself in currentTerm, so at an equal term
+    // voteOk is false for any other candidate and the request is denied.
+    val voteOk  = effectiveVote.forall(_ == proposedLeaderAddress)
+    val granted = logOk && voteOk && candidateTerm >= currentTerm
+
+    granted match
       case true =>
+        // Granting a vote is not leader recognition: the candidate may still lose,
+        // so currentLeader stays unknown until an AppendEntries proves a winner.
         (
-          Follower(address, candidateTerm, Some(proposedLeaderAddress), votedFor = Some(proposedLeaderAddress)),
+          Follower(address, effectiveTerm, currentLeader = None, votedFor = Some(proposedLeaderAddress)),
           (
-            VoteResponse(address, candidateTerm, logOk && termOk),
+            VoteResponse(address, effectiveTerm, true),
             List(StoreState)
           )
         )
       case false =>
+        // Denied, but a strictly greater term still forces a step down (Raft Paper 5.1).
+        val nextState: Node =
+          termAdopted match
+            case true  => Follower(address, effectiveTerm, currentLeader = None, votedFor = None)
+            case false => this
         (
-          this,
+          nextState,
           (
-            VoteResponse(address, currentTerm, logOk && termOk),
-            List.empty[Action]
+            VoteResponse(address, effectiveTerm, false),
+            Option.when(termAdopted)(StoreState).toList
           )
         )
   }
@@ -415,30 +437,41 @@ case class Candidate(
 
     val VoteResponse(responseAddress, term, voteGranted) = voteResponse
 
-    val newVoteReceived =
-      if (voteGranted) voteReceived + responseAddress else voteReceived
-    val logIndex = logState.lastLogIndex
-
-    if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
-      // construct the leader state
-      val sentIndexMap = clusterConfiguration.members
-        .filter(_ != address)
-        .map(node => (node, logIndex)) // use last index (0-based)
-        .toMap
-      val ackedIndexMap = clusterConfiguration.members
-        .filter(_ != address)
-        .map(node => (node, -1L)) // -1 means no entries acknowledged yet
-        .toMap
-      val actions = clusterConfiguration.members.filter(_ != address).map(n => ReplicateLog(n, currentTerm, logIndex))
-
-      (
-        Leader(address, currentTerm, sentIndexMap, ackedIndexMap),
-        StoreState :: AnnounceLeader(address) :: actions
+    // Raft Paper §5.1: if any RPC *response* contains a term greater than currentTerm,
+    // convert to follower immediately, before doing anything else.
+    Option
+      .when(term > currentTerm)(
+        (Follower(address, term, currentLeader = None, votedFor = None): Node, List(StoreState))
       )
+      .getOrElse {
 
-    } else {
-      (this.copy(voteReceived = newVoteReceived), List.empty[Action])
-    }
+        val newVoteReceived =
+          if (voteGranted) voteReceived + responseAddress else voteReceived
+        val logIndex = logState.lastLogIndex
+
+        if (term == currentTerm && voteGranted && newVoteReceived.size >= clusterConfiguration.quorumSize) {
+          // construct the leader state
+          val sentIndexMap = clusterConfiguration.members
+            .filter(_ != address)
+            .map(node => (node, logIndex)) // use last index (0-based)
+            .toMap
+          val ackedIndexMap = clusterConfiguration.members
+            .filter(_ != address)
+            .map(node => (node, -1L)) // -1 means no entries acknowledged yet
+            .toMap
+          val actions =
+            clusterConfiguration.members.filter(_ != address).map(n => ReplicateLog(n, currentTerm, logIndex))
+
+          (
+            Leader(address, currentTerm, sentIndexMap, ackedIndexMap),
+            StoreState :: AnnounceLeader(address) :: actions
+          )
+
+        } else {
+          (this.copy(voteReceived = newVoteReceived), List.empty[Action])
+        }
+
+      }
   }
 
   /** This method is called when a LogRequest is received Note that the candidate will become a follower if the term of
@@ -661,31 +694,48 @@ case class Leader(
 
     val VoteRequest(candidateAddress, candidateTerm, candidateLogIndex, candidateLastLogTerm) = voteRequest
 
-    val lastLogTerm = logState.lastLogTerm.getOrElse(currentTerm)
+    val lastLogTerm = logState.lastLogTerm.getOrElse(0L)
 
     // Check if candidate’s log is at least as up-to-date as leader’s log (§5.4)
     val logOk =
       (candidateLastLogTerm > lastLogTerm) ||
         (candidateLastLogTerm == lastLogTerm && candidateLogIndex >= logState.lastLogIndex)
 
-    val termOk = candidateTerm > currentTerm
+    // A leader has implicitly voted for itself in currentTerm, so it can only ever grant
+    // a vote in a strictly greater term (Raft Paper 5.2).
+    val termAdopted = candidateTerm > currentTerm
 
-    if (logOk && termOk) {
-      // New legitimate leader detected: step down to follower and reset leader state
-      val newState = Follower(address, candidateTerm, Some(candidateAddress))
-      val response = VoteResponse(address, candidateTerm, true)
-      val actions  = List(StoreState, ResetLeaderAnnouncer) // persist and reset leadership
-      (newState, (response, actions))
-    } else {
-      // Reject vote but update replication progress for candidate to help log sync
-      val candidateLastIndex  = candidateLogIndex // convert length to index
-      val updatedSentIndexMap = this.sentIndexMap + (candidateAddress -> candidateLastIndex)
-      val updatedAckIndexMap  = this.ackIndexMap + (candidateAddress  -> candidateLastIndex)
-      val newState            = this.copy(sentIndexMap = updatedSentIndexMap, ackIndexMap = updatedAckIndexMap)
-      val response            = VoteResponse(address, currentTerm, false)
-      // Trigger replication to help candidate catch up
-      val actions = List(ReplicateLog(candidateAddress, currentTerm, candidateLastIndex))
-      (newState, (response, actions))
+    (logOk && termAdopted) match {
+      case true =>
+        // New legitimate leader detected: step down to follower and reset leader state.
+        // A granted vote is not leader recognition, so currentLeader stays unknown.
+        val newState = Follower(address, candidateTerm, currentLeader = None, votedFor = Some(candidateAddress))
+        val response = VoteResponse(address, candidateTerm, true)
+        val actions  = List(StoreState, ResetLeaderAnnouncer) // persist and reset leadership
+        (newState, (response, actions))
+      case false =>
+        termAdopted match {
+          case true =>
+            // Vote denied because the candidate log is stale, yet the greater term must
+            // still be adopted and leadership relinquished (Raft Paper 5.1).
+            val newState = Follower(address, candidateTerm, currentLeader = None, votedFor = None)
+            val response = VoteResponse(address, candidateTerm, false)
+            (newState, (response, List(StoreState, ResetLeaderAnnouncer)))
+          case false =>
+            // Stale or equal term: stay leader and reject.  Do NOT update ackIndexMap
+            // with the candidate's self-reported log index — that is unverified data and
+            // must never drive commit decisions (Raft §5.4.2).  Only a successful
+            // LogRequestResponse from an actual replication round may advance matchIndex.
+            //
+            // We still trigger a replication round so the candidate can catch up, but we
+            // use the leader's existing sentIndex for that peer (or -1 as the default) to
+            // avoid seeding nextIndex from untrusted data.
+            val currentSentIndex = sentIndexMap.getOrElse(candidateAddress, -1L)
+            val newState         = this
+            val response         = VoteResponse(address, currentTerm, false)
+            val actions          = List(ReplicateLog(candidateAddress, currentTerm, currentSentIndex))
+            (newState, (response, actions))
+        }
     }
   }
 
@@ -712,12 +762,15 @@ case class Leader(
       clusterConfiguration: ClusterConfiguration
   ): (Node, (LogRequestResponse, List[Action])) = {
 
-    if (logRequest.term < currentTerm) {
-      // RPC term is stale: reject replication request
+    if (logRequest.term <= currentTerm) {
+      // Stale term, or an equal term which would imply two leaders in the same term.
+      // Election Safety (Raft Paper 5.2) guarantees at most one leader per term, so an
+      // equal-term AppendEntries cannot come from a legitimate leader and is rejected
+      // rather than accepted, which would otherwise let a peer overwrite this log.
       val response = LogRequestResponse(address, currentTerm, logState.lastLogIndex, success = false)
       (this, (response, List.empty))
     } else {
-      // Higher or equal term from another leader or candidate: step down to follower
+      // Strictly higher term from a legitimate leader: step down to follower
       // When stepping down to follower due to a higher term leader (leaderId),
       // we must inform the system about the new leader and reset any previous leadership state.
       // This prevents the system from holding stale leadership information which could cause conflicts or stale reads.
@@ -806,9 +859,12 @@ case class Leader(
       (newState, List(StoreState, ResetLeaderAnnouncer))
     } else {
       if (success) {
-        // Replication succeeded: update sent and ack maps with follower's ack index
+        // Replication succeeded: update sent index and advance (never regress) the ack
+        // index.  Raft §5.3 / Figure 2 requires matchIndex to be monotonically
+        // non-decreasing.  A delayed or reordered response carrying a smaller
+        // ackLogIndex must not overwrite a more recent, higher value.
         val newSentIndexMap = sentIndexMap + (fromNodeId -> ackLogIndex)
-        val newAckIndexMap  = ackIndexMap + (fromNodeId  -> ackLogIndex)
+        val newAckIndexMap = ackIndexMap + (fromNodeId -> math.max(ackIndexMap.getOrElse(fromNodeId, -1L), ackLogIndex))
 
         // Combine with self's applied log index to determine commit indices
         val combinedAckMap = newAckIndexMap + (address -> logState.appliedLogIndex)
